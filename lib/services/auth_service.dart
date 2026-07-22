@@ -1,0 +1,223 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../models/staff_member.dart';
+
+class AuthService extends ChangeNotifier {
+  final SupabaseClient _client = Supabase.instance.client;
+
+  User? get currentUser => _client.auth.currentUser;
+  Session? get currentSession => _client.auth.currentSession;
+  bool get isAuthenticated => currentSession != null;
+
+  StaffMember? _currentStaff;
+  StaffMember? get currentStaff => _currentStaff;
+
+  StaffRole? get userRole => _currentStaff?.role;
+  bool get isAdmin => userRole == StaffRole.receptionist;
+  bool get isCleaner => userRole == StaffRole.cleaner;
+
+  StreamSubscription<AuthState>? _authSubscription;
+
+  void init() {
+    _authSubscription = _client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+      if (event == AuthChangeEvent.signedIn) {
+        _fetchStaffProfile();
+      } else if (event == AuthChangeEvent.signedOut) {
+        _currentStaff = null;
+        notifyListeners();
+      }
+    });
+
+    if (isAuthenticated) {
+      _fetchStaffProfile();
+    }
+  }
+
+  /// Fetch all active staff names for the login dropdown
+  Future<List<Map<String, String>>> fetchStaffForLogin() async {
+    try {
+      final data = await _client
+          .from('staff')
+          .select('id, name, account_name, user_id, login_email')
+          .eq('is_active', true)
+          .order('name');
+
+      return (data as List).map((json) => {
+        'id': json['id'] as String,
+        'name': json['name'] as String,
+        'account_name': json['account_name'] as String? ?? '',
+        'user_id': json['user_id'] as String? ?? '',
+        'login_email': json['login_email'] as String? ?? '',
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching staff for login: $e');
+      return [];
+    }
+  }
+
+  /// Generate a fake email from staff name and ID
+  static String generateEmail(String name, String id) {
+    final safeName = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+    final shortId = id.substring(0, 8);
+    return '${safeName}_$shortId@hotel.local';
+  }
+
+  /// Sign in with email and password
+  Future<bool> signIn(String email, String password) async {
+    try {
+      final response = await _client.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      if (response.session != null) {
+        await _fetchStaffProfile();
+        return true;
+      }
+      return false;
+    } on AuthException catch (e) {
+      debugPrint('Sign in error: ${e.message}');
+      rethrow;
+    }
+  }
+
+  /// Create a new staff auth user (called by admin)
+  /// Uses direct HTTP call to Supabase signup endpoint, then auto-confirms.
+  Future<({String email, String tempPassword})> createStaffAuth({
+    required String staffId,
+    required String name,
+  }) async {
+    final email = generateEmail(name, staffId);
+    final tempPassword = 'Temp${DateTime.now().millisecondsSinceEpoch % 10000}!';
+
+    final url = const String.fromEnvironment('SUPABASE_URL');
+    final anonKey = const String.fromEnvironment('SUPABASE_ANON_KEY');
+
+    // Direct HTTP signup — no client session needed
+    final response = await http.post(
+      Uri.parse('$url/auth/v1/signup'),
+      headers: {
+        'apikey': anonKey,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'email': email,
+        'password': tempPassword,
+        'data': {},
+      }),
+    );
+
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      final body = jsonDecode(response.body);
+      throw Exception(body['msg'] ?? 'Signup failed (${response.statusCode})');
+    }
+
+    final result = jsonDecode(response.body);
+    debugPrint('Signup response: $result');
+
+    // Handle different response shapes from GoTrue
+    final newUserId = (result['id'] as String?) ??
+        (result['user'] as Map<String, dynamic>?)?['id'] as String?;
+    if (newUserId == null) {
+      throw Exception('Signup succeeded but no user ID returned: $result');
+    }
+
+    // Auto-confirm the user via RPC (admin session) — safe to ignore if already confirmed
+    try {
+      await _client.rpc('auto_confirm_user', params: {
+        'p_user_id': newUserId,
+      });
+      debugPrint('Auto-confirm succeeded');
+    } catch (e) {
+      debugPrint('Auto-confirm RPC failed (non-fatal): $e');
+    }
+
+    // Link the auth user to the staff record using admin session
+    debugPrint('Linking staff $staffId to user $newUserId');
+    await _client.from('staff').update({
+      'user_id': newUserId,
+      'login_email': email,
+    }).eq('id', staffId);
+
+    debugPrint('Staff linked successfully');
+    return (email: email, tempPassword: tempPassword);
+  }
+
+  /// Change the current user's password
+  Future<bool> changePassword(String newPassword) async {
+    try {
+      await _client.auth.updateUser(
+        UserAttributes(password: newPassword),
+      );
+      return true;
+    } on AuthException catch (e) {
+      debugPrint('Change password error: ${e.message}');
+      rethrow;
+    }
+  }
+
+  /// Admin reset a staff member's password
+  Future<({String tempPassword})?> resetStaffPassword(String staffId) async {
+    try {
+      final staff = await _client
+          .from('staff')
+          .select('user_id, name')
+          .eq('id', staffId)
+          .single();
+
+      final userId = staff['user_id'] as String?;
+      if (userId == null) return null;
+
+      final tempPassword = 'Reset${DateTime.now().millisecondsSinceEpoch % 10000}!';
+
+      await _client.rpc('reset_staff_password', params: {
+        'p_user_id': userId,
+        'p_new_password': tempPassword,
+      });
+
+      return (tempPassword: tempPassword);
+    } catch (e) {
+      debugPrint('Error resetting staff password: $e');
+      return null;
+    }
+  }
+
+  Future<void> signOut() async {
+    await _client.auth.signOut();
+    _currentStaff = null;
+    notifyListeners();
+  }
+
+  Future<void> _fetchStaffProfile() async {
+    final user = currentUser;
+    if (user == null) return;
+
+    try {
+      final data = await _client
+          .from('staff')
+          .select()
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .maybeSingle();
+
+      if (data != null) {
+        _currentStaff = StaffMember.fromJson(data);
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error fetching staff profile: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+}
