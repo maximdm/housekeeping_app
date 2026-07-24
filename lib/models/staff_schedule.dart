@@ -19,10 +19,10 @@ class StaffSchedule {
     return StaffSchedule(
       id: json['id'] as String,
       staffId: json['staff_id'] as String,
-      date: DateTime.parse(json['date'] as String),
+      date: DateTime.parse(json['date'] as String).toLocal(),
       isOnShift: json['is_on_shift'] as bool? ?? true,
       notes: json['notes'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
     );
   }
 

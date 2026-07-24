@@ -40,7 +40,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
 
       if (mounted) {
         showTimedSnackBar(
-          const SnackBar(content: Text('Password changed successfully')),
+          SnackBar(content: Text(localizations.tr('passwordChangedSuccessfully'))),
         );
         Routefly.navigate(_homeRoute ?? '/staff/home/staff_dashboard');
       }
@@ -51,7 +51,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
         });
         showTimedSnackBar(
           SnackBar(
-            content: Text('Failed to change password: $e'),
+            content: Text(localizations.tr('failedToChangePassword').replaceAll('{error}', '$e')),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -78,7 +78,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
         .select('role')
         .eq('user_id', user.id)
         .maybeSingle();
-    _homeRoute = (staffData != null && staffData['role'] == 'receptionist')
+    _homeRoute = (staffData != null && (staffData['role'] == 'receptionist' || staffData['role'] == 'manager'))
         ? '/admin/overview'
         : '/staff/home/staff_dashboard';
     if (mounted) setState(() {});
@@ -88,7 +88,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Change Password'),
+        title: Text(localizations.tr('changePasswordTitle')),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
             onPressed: () => Routefly.navigate(_homeRoute ?? '/staff/home/staff_dashboard'),
@@ -111,7 +111,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Update Your Password',
+                    localizations.tr('updateYourPassword'),
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -119,7 +119,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Choose a strong password that you haven\'t used before.',
+                    localizations.tr('chooseStrongPassword'),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Colors.grey[600],
                         ),
@@ -130,7 +130,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                     controller: _newPasswordController,
                     obscureText: _obscureNew,
                     decoration: InputDecoration(
-                      labelText: 'New Password',
+                      labelText: localizations.tr('newPassword'),
                       prefixIcon: const Icon(Icons.lock_outline),
                       border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
@@ -142,10 +142,10 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Please enter a new password';
+                        return localizations.tr('pleaseEnterNewPassword');
                       }
                       if (value.trim().length < 6) {
-                        return 'Password must be at least 6 characters';
+                        return localizations.tr('passwordTooShort');
                       }
                       return null;
                     },
@@ -155,7 +155,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                     controller: _confirmPasswordController,
                     obscureText: _obscureConfirm,
                     decoration: InputDecoration(
-                      labelText: 'Confirm New Password',
+                      labelText: localizations.tr('confirmPassword'),
                       prefixIcon: const Icon(Icons.lock_outline),
                       border: const OutlineInputBorder(),
                       suffixIcon: IconButton(
@@ -167,10 +167,10 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Please confirm your password';
+                        return localizations.tr('pleaseConfirmPassword');
                       }
                       if (value.trim() != _newPasswordController.text.trim()) {
-                        return 'Passwords do not match';
+                        return localizations.tr('passwordMismatch');
                       }
                       return null;
                     },
@@ -184,7 +184,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                             width: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Change Password'),
+                        : Text(localizations.tr('changePassword')),
                   ),
                 ],
               ),

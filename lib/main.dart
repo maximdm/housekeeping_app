@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:forui/forui.dart';
 import 'package:routefly/routefly.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'l10n/app_localizations.dart';
 import 'main.route.dart';
 import 'services/notification_service.dart';
 import 'services/theme_service.dart';
@@ -13,6 +15,7 @@ import 'services/theme_service.dart';
 part 'main.g.dart';
 
 final themeService = ThemeService();
+final localizations = AppLocalizations.instance;
 final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 ScaffoldMessengerState get appMessenger => scaffoldMessengerKey.currentState!;
 
@@ -40,6 +43,7 @@ void main() async {
 
   await NotificationService().init();
   await themeService.init();
+  await localizations.init();
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -73,7 +77,7 @@ class HousekeepingApp extends StatelessWidget {
     final darkTheme = FThemeData(touch: true, colors: darkColors);
 
     return ListenableBuilder(
-      listenable: themeService,
+      listenable: Listenable.merge([themeService, localizations]),
       builder: (context, _) {
         final isDark = themeService.isDark;
         final activeTheme = isDark ? darkTheme : lightTheme;
@@ -82,6 +86,16 @@ class HousekeepingApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           scaffoldMessengerKey: scaffoldMessengerKey,
           themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [
+            Locale('en'),
+            Locale('ro'),
+          ],
+          locale: Locale(localizations.localeCode),
           theme: lightTheme.toApproximateMaterialTheme().copyWith(
                 iconTheme: const IconThemeData(color: red),
                 appBarTheme: const AppBarTheme(

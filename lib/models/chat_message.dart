@@ -33,7 +33,7 @@ class ChatMessage {
       senderName: senderName,
       senderRole: senderRole,
       content: json['content'] as String,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
     );
   }
 

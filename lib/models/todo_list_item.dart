@@ -22,7 +22,7 @@ class TodoListItem {
       title: json['title'] as String,
       isDone: json['is_done'] as bool,
       sortOrder: json['sort_order'] as int? ?? 0,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
     );
   }
 }

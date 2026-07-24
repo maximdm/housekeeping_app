@@ -22,7 +22,7 @@ class ChatMessage {
       content: json['content'] as String,
       isUser: json['is_user'] as bool,
       archived: json['archived'] as bool? ?? false,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
     );
   }
 
@@ -55,6 +55,21 @@ class ChatbotService {
 
   String? get _userId => _client.auth.currentUser?.id;
 
+  // --- Language Detection ---
+
+  bool _isRomanian(String text) {
+    final lower = text.toLowerCase();
+    final romanianPatterns = [
+      'camera', 'camere', 'etaj', 'etaje', 'personal', 'angajat',
+      'curat', 'murdar', 'curatenie', 'stare', 'status', 'activitate',
+      'salut', 'ajutor', 'ajuta', 'poti', 'vreau', 'spune',
+      'astazi', 'ieri', 'maine', 'acum', 'ieri', 'azi',
+      'numar', 'detalii', 'notite', 'program', 'tura',
+      'da', 'nu', 'multumesc', 'te rog',
+    ];
+    return romanianPatterns.any((p) => lower.contains(p));
+  }
+
   // --- Persistence ---
 
   Future<void> loadMessages({bool includeArchived = false}) async {
@@ -79,7 +94,6 @@ class ChatbotService {
     if (_userId == null) return;
     try {
       await _client.from('ai_chat_messages').insert({
-        'id': msg.id,
         'user_id': _userId,
         'content': msg.content,
         'is_user': msg.isUser,
@@ -211,7 +225,7 @@ class ChatbotService {
 
   ChatMessage sendMessage(String text) {
     final userMessage = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: _localId(),
       content: text,
       isUser: true,
       createdAt: DateTime.now(),
@@ -223,33 +237,52 @@ class ChatbotService {
 
   Future<ChatMessage> processQuery(String text) async {
     final lower = text.toLowerCase().trim();
+    final isRo = _isRomanian(lower);
 
     String response;
 
-    if (_matchesAny(lower, ['hello', 'hi', 'hey', 'help'])) {
-      response = _helpResponse();
-    } else if (_matchesAny(lower, ['need cleaning', 'dirty', 'need clean'])) {
-      response = await _roomsNeedingCleaning();
-    } else if (_matchesAny(lower, ['in progress', 'being cleaned'])) {
-      response = await _roomsInProgress();
-    } else if (_matchesAny(lower, ['clean', 'ready', 'available'])) {
-      response = await _cleanRooms();
-    } else if (_matchesAny(lower, ['all rooms', 'rooms status', 'room status', 'rooms'])) {
-      response = await _allRoomsStatus();
-    } else if (_matchesAny(lower, ['staff', 'cleaner', 'team', 'who'])) {
-      response = await _activeStaff();
-    } else if (_matchesAny(lower, ['activity', 'log', 'recent', 'history'])) {
-      response = await _recentActivity();
-    } else if (_matchesAny(lower, ['floor', 'floors'])) {
-      response = await _roomsByFloor();
+    if (_matchesAny(lower, ['hello', 'hi', 'hey', 'help', 'salut', 'ajutor', 'ajuta'])) {
+      response = isRo ? _helpResponseRo() : _helpResponse();
+    } else if (_matchesAny(lower, [
+      'need cleaning', 'dirty', 'need clean',
+      'murdar', 'curatenie', 'necurățat', 'necurat', 'trebuie curățat',
+    ])) {
+      response = await _roomsNeedingCleaning(isRo: isRo);
+    } else if (_matchesAny(lower, [
+      'in progress', 'being cleaned',
+      'se curata', 'în curs', 'se curăță', 'în lucru',
+    ])) {
+      response = await _roomsInProgress(isRo: isRo);
+    } else if (_matchesAny(lower, [
+      'clean', 'ready', 'available',
+      'curat', 'pregatit', 'pregătit', 'disponibil',
+    ])) {
+      response = await _cleanRooms(isRo: isRo);
+    } else if (_matchesAny(lower, [
+      'all rooms', 'rooms status', 'room status', 'rooms',
+      'toate camerele', 'stare camere', 'camere',
+    ])) {
+      response = await _allRoomsStatus(isRo: isRo);
+    } else if (_matchesAny(lower, [
+      'staff', 'cleaner', 'team', 'who',
+      'personal', 'echipa', 'echipă', 'cine',
+    ])) {
+      response = await _activeStaff(isRo: isRo);
+    } else if (_matchesAny(lower, [
+      'activity', 'log', 'recent', 'history',
+      'activitate', 'jurnal', 'recent', 'istoric',
+    ])) {
+      response = await _recentActivity(isRo: isRo);
+    } else if (_matchesAny(lower, ['floor', 'floors', 'etaj', 'etaje'])) {
+      response = await _roomsByFloor(isRo: isRo);
     } else if (_containsRoomNumber(lower)) {
-      response = await _roomDetail(lower);
+      response = await _roomDetail(lower, isRo: isRo);
     } else {
-      response = _defaultResponse();
+      response = isRo ? _defaultResponseRo() : _defaultResponse();
     }
 
     final botMessage = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: _localId(),
       content: response,
       isUser: false,
       createdAt: DateTime.now(),
@@ -259,14 +292,27 @@ class ChatbotService {
     return botMessage;
   }
 
+  String _localId() {
+    return '${DateTime.now().millisecondsSinceEpoch}-${_randomHex(8)}';
+  }
+
+  String _randomHex(int len) {
+    const chars = '0123456789abcdef';
+    final rng = DateTime.now().microsecondsSinceEpoch;
+    return List.generate(len, (i) => chars[(rng >> (i * 4)) & 0xf]).join();
+  }
+
   bool _matchesAny(String input, List<String> keywords) {
     return keywords.any((k) => input.contains(k));
   }
 
   bool _containsRoomNumber(String input) {
     final roomPattern = RegExp(r'room\s*([A-Za-z]?\d+)', caseSensitive: false);
-    return roomPattern.hasMatch(input);
+    final roomPatternRo = RegExp(r'camera\s*([A-Za-z]?\d+)', caseSensitive: false);
+    return roomPattern.hasMatch(input) || roomPatternRo.hasMatch(input);
   }
+
+  // --- English Responses ---
 
   String _helpResponse() {
     return 'Here\'s what I can help with:\n\n'
@@ -289,7 +335,32 @@ class ChatbotService {
         'Type "help" for a full list of commands.';
   }
 
-  Future<String> _roomsNeedingCleaning() async {
+  // --- Romanian Responses ---
+
+  String _helpResponseRo() {
+    return 'Iată ce te pot ajuta:\n\n'
+        '• "camere murdare" — vezi camerele care trebuie curățate\n'
+        '• "camere în lucru" — vezi camerele care se curăță\n'
+        '• "camere curate" — vezi camerele disponibile\n'
+        '• "toate camerele" — privire de ansamblu asupra statusului camerelor\n'
+        '• "camera 101" sau "camera P01" — detalii despre o cameră specifică\n'
+        '• "personal" sau "echipa" — vezi personalul activ\n'
+        '• "activitate" — jurnalul de activitate recent\n'
+        '• "etaje" — camere grupate pe etaje';
+  }
+
+  String _defaultResponseRo() {
+    return 'Nu sunt sigur ce vrei să spui. Încearcă să întrebi despre:\n\n'
+        '• Camere (curate, murdare, în lucru)\n'
+        '• Disponibilitatea personalului\n'
+        '• Activitatea recentă\n'
+        '• O cameră specifică (ex: "camera 101" sau "camera P01")\n\n'
+        'Scrie "ajutor" pentru lista completă de comenzi.';
+  }
+
+  // --- Room Queries ---
+
+  Future<String> _roomsNeedingCleaning({bool isRo = false}) async {
     try {
       final data = await _client
           .from('rooms')
@@ -298,23 +369,30 @@ class ChatbotService {
           .order('number');
 
       final rooms = data as List;
-      if (rooms.isEmpty) return 'All rooms are clean! No rooms currently need cleaning.';
+      if (rooms.isEmpty) {
+        return isRo
+            ? 'Toate camerele sunt curate! Nicio cameră nu necesită curățenie în acest moment.'
+            : 'All rooms are clean! No rooms currently need cleaning.';
+      }
 
-      final buffer = StringBuffer('**Rooms Needing Cleaning** (${rooms.length})\n\n');
+      final title = isRo ? 'Camere care necesită curățenie' : 'Rooms Needing Cleaning';
+      final buffer = StringBuffer('**$title** (${rooms.length})\n\n');
       for (final room in rooms) {
-        final type = (room['room_type'] as Map<String, dynamic>?)?['name'] ?? 'Unknown';
+        final type = (room['room_type'] as Map<String, dynamic>?)?['name'] ?? (isRo ? 'Necunoscut' : 'Unknown');
         final floor = (room['floor'] as Map<String, dynamic>?)?['name'] ??
-            'Floor ${(room['floor'] as Map<String, dynamic>?)?['number'] ?? '?'}';
-        buffer.writeln('• Room ${room['number']} — $type ($floor)');
+            '${isRo ? 'Etaj' : 'Floor'} ${(room['floor'] as Map<String, dynamic>?)?['number'] ?? '?'}';
+        buffer.writeln('• ${isRo ? 'Camera' : 'Room'} ${room['number']} — $type ($floor)');
       }
       return buffer.toString();
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch room data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele camerelor. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch room data. Please try again.';
     }
   }
 
-  Future<String> _roomsInProgress() async {
+  Future<String> _roomsInProgress({bool isRo = false}) async {
     try {
       final data = await _client
           .from('rooms')
@@ -323,23 +401,30 @@ class ChatbotService {
           .order('number');
 
       final rooms = data as List;
-      if (rooms.isEmpty) return 'No rooms are currently being cleaned.';
+      if (rooms.isEmpty) {
+        return isRo
+            ? 'Nicio cameră nu este în curs de curățenie în acest moment.'
+            : 'No rooms are currently being cleaned.';
+      }
 
-      final buffer = StringBuffer('**Rooms In Progress** (${rooms.length})\n\n');
+      final title = isRo ? 'Camere în lucru' : 'Rooms In Progress';
+      final buffer = StringBuffer('**$title** (${rooms.length})\n\n');
       for (final room in rooms) {
-        final type = (room['room_type'] as Map<String, dynamic>?)?['name'] ?? 'Unknown';
+        final type = (room['room_type'] as Map<String, dynamic>?)?['name'] ?? (isRo ? 'Necunoscut' : 'Unknown');
         final floor = (room['floor'] as Map<String, dynamic>?)?['name'] ??
-            'Floor ${(room['floor'] as Map<String, dynamic>?)?['number'] ?? '?'}';
-        buffer.writeln('• Room ${room['number']} — $type ($floor)');
+            '${isRo ? 'Etaj' : 'Floor'} ${(room['floor'] as Map<String, dynamic>?)?['number'] ?? '?'}';
+        buffer.writeln('• ${isRo ? 'Camera' : 'Room'} ${room['number']} — $type ($floor)');
       }
       return buffer.toString();
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch room data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele camerelor. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch room data. Please try again.';
     }
   }
 
-  Future<String> _cleanRooms() async {
+  Future<String> _cleanRooms({bool isRo = false}) async {
     try {
       final data = await _client
           .from('rooms')
@@ -348,33 +433,49 @@ class ChatbotService {
           .order('number');
 
       final rooms = data as List;
-      if (rooms.isEmpty) return 'No rooms are currently clean.';
+      if (rooms.isEmpty) {
+        return isRo
+            ? 'Nicio cameră nu este curată în acest moment.'
+            : 'No rooms are currently clean.';
+      }
 
-      final buffer = StringBuffer('**Clean Rooms** (${rooms.length})\n\n');
+      final title = isRo ? 'Camere curate' : 'Clean Rooms';
+      final buffer = StringBuffer('**$title** (${rooms.length})\n\n');
       for (final room in rooms) {
-        final type = (room['room_type'] as Map<String, dynamic>?)?['name'] ?? 'Unknown';
+        final type = (room['room_type'] as Map<String, dynamic>?)?['name'] ?? (isRo ? 'Necunoscut' : 'Unknown');
         final floor = (room['floor'] as Map<String, dynamic>?)?['name'] ??
-            'Floor ${(room['floor'] as Map<String, dynamic>?)?['number'] ?? '?'}';
-        buffer.writeln('• Room ${room['number']} — $type ($floor)');
+            '${isRo ? 'Etaj' : 'Floor'} ${(room['floor'] as Map<String, dynamic>?)?['number'] ?? '?'}';
+        buffer.writeln('• ${isRo ? 'Camera' : 'Room'} ${room['number']} — $type ($floor)');
       }
       return buffer.toString();
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch room data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele camerelor. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch room data. Please try again.';
     }
   }
 
-  Future<String> _allRoomsStatus() async {
+  Future<String> _allRoomsStatus({bool isRo = false}) async {
     try {
       final data = await _client.from('rooms').select('number, status');
 
       final rooms = data as List;
-      if (rooms.isEmpty) return 'No rooms found in the system.';
+      if (rooms.isEmpty) {
+        return isRo ? 'Nu s-au găsit camere în sistem.' : 'No rooms found in the system.';
+      }
 
       final dirty = rooms.where((r) => r['status'] == 'dirty').length;
       final inProgress = rooms.where((r) => r['status'] == 'in_progress').length;
       final clean = rooms.where((r) => r['status'] == 'clean').length;
 
+      if (isRo) {
+        return '**Privire de ansamblu asupra statusului camerelor**\n\n'
+            'Total camere: ${rooms.length}\n'
+            '🟢 Curate: $clean\n'
+            '🟡 În lucru: $inProgress\n'
+            '🔴 Necesită curățenie: $dirty';
+      }
       return '**Room Status Overview**\n\n'
           'Total rooms: ${rooms.length}\n'
           '🟢 Clean: $clean\n'
@@ -382,11 +483,13 @@ class ChatbotService {
           '🔴 Need Cleaning: $dirty';
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch room data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele camerelor. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch room data. Please try again.';
     }
   }
 
-  Future<String> _activeStaff() async {
+  Future<String> _activeStaff({bool isRo = false}) async {
     try {
       final data = await _client
           .from('staff')
@@ -395,15 +498,20 @@ class ChatbotService {
           .order('name');
 
       final staff = data as List;
-      if (staff.isEmpty) return 'No staff members are currently active.';
+      if (staff.isEmpty) {
+        return isRo
+            ? 'Niciun angajat nu este activ în acest moment.'
+            : 'No staff members are currently active.';
+      }
 
       final cleaners = staff.where((s) => s['role'] == 'cleaner').toList();
-      final receptionists = staff.where((s) => s['role'] == 'receptionist').toList();
+      final receptionists = staff.where((s) => s['role'] == 'receptionist' || s['role'] == 'manager').toList();
 
-      final buffer = StringBuffer('**Active Staff** (${staff.length})\n\n');
+      final title = isRo ? 'Personal activ' : 'Active Staff';
+      final buffer = StringBuffer('**$title** (${staff.length})\n\n');
 
       if (cleaners.isNotEmpty) {
-        buffer.writeln('Cleaners (${cleaners.length}):');
+        buffer.writeln('${isRo ? 'Curățători' : 'Cleaners'} (${cleaners.length}):');
         for (final s in cleaners) {
           buffer.writeln('  • ${s['name']}');
         }
@@ -411,7 +519,7 @@ class ChatbotService {
       }
 
       if (receptionists.isNotEmpty) {
-        buffer.writeln('Receptionists (${receptionists.length}):');
+        buffer.writeln('${isRo ? 'Manageri și Recepționeri' : 'Managers & Receptionists'} (${receptionists.length}):');
         for (final s in receptionists) {
           buffer.writeln('  • ${s['name']}');
         }
@@ -420,11 +528,13 @@ class ChatbotService {
       return buffer.toString();
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch staff data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele personalului. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch staff data. Please try again.';
     }
   }
 
-  Future<String> _recentActivity() async {
+  Future<String> _recentActivity({bool isRo = false}) async {
     try {
       final data = await _client
           .from('activity_log')
@@ -433,26 +543,43 @@ class ChatbotService {
           .limit(10);
 
       final entries = data as List;
-      if (entries.isEmpty) return 'No recent activity found.';
+      if (entries.isEmpty) {
+        return isRo ? 'Nu s-a găsit activitate recentă.' : 'No recent activity found.';
+      }
 
-      final buffer = StringBuffer('**Recent Activity**\n\n');
+      final title = isRo ? 'Activitate recentă' : 'Recent Activity';
+      final buffer = StringBuffer('**$title**\n\n');
       for (final entry in entries) {
-        final name = (entry['staff'] as Map<String, dynamic>?)?['name'] ?? 'System';
+        final name = (entry['staff'] as Map<String, dynamic>?)?['name'] ?? (isRo ? 'Sistem' : 'System');
         final action = entry['action'] as String;
-        final time = DateTime.parse(entry['created_at'] as String);
+        final time = DateTime.parse(entry['created_at'] as String).toLocal();
         final timeStr = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
 
         String actionText;
-        switch (action) {
-          case 'status_changed':
-            final status = (entry['details'] as Map<String, dynamic>?)?['new_status'] ?? '';
-            actionText = 'changed status to $status';
-          case 'room_assigned':
-            actionText = 'was assigned a room';
-          case 'note_added':
-            actionText = 'added a note';
-          default:
-            actionText = action;
+        if (isRo) {
+          switch (action) {
+            case 'status_changed':
+              final status = (entry['details'] as Map<String, dynamic>?)?['new_status'] ?? '';
+              actionText = 'a schimbat statusul în $status';
+            case 'room_assigned':
+              actionText = 'a fost repartizat la o cameră';
+            case 'note_added':
+              actionText = 'a adăugat o notă';
+            default:
+              actionText = action;
+          }
+        } else {
+          switch (action) {
+            case 'status_changed':
+              final status = (entry['details'] as Map<String, dynamic>?)?['new_status'] ?? '';
+              actionText = 'changed status to $status';
+            case 'room_assigned':
+              actionText = 'was assigned a room';
+            case 'note_added':
+              actionText = 'added a note';
+            default:
+              actionText = action;
+          }
         }
 
         buffer.writeln('$timeStr — $name $actionText');
@@ -460,11 +587,13 @@ class ChatbotService {
       return buffer.toString();
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch activity data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele de activitate. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch activity data. Please try again.';
     }
   }
 
-  Future<String> _roomsByFloor() async {
+  Future<String> _roomsByFloor({bool isRo = false}) async {
     try {
       final data = await _client.from('rooms').select('''
         number, status,
@@ -472,37 +601,45 @@ class ChatbotService {
       ''').order('number');
 
       final rooms = data as List;
-      if (rooms.isEmpty) return 'No rooms found.';
+      if (rooms.isEmpty) return isRo ? 'Nu s-au găsit camere.' : 'No rooms found.';
 
       final grouped = <String, List>{};
       for (final room in rooms) {
         final floorData = room['floor'] as Map<String, dynamic>?;
         final floorName = floorData?['name'] as String? ??
-            'Floor ${floorData?['number'] ?? '?'}';
+            '${isRo ? 'Etaj' : 'Floor'} ${floorData?['number'] ?? '?'}';
         grouped.putIfAbsent(floorName, () => []).add(room);
       }
 
-      final buffer = StringBuffer('**Rooms by Floor**\n\n');
+      final title = isRo ? 'Camere pe etaj' : 'Rooms by Floor';
+      final buffer = StringBuffer('**$title**\n\n');
       for (final entry in grouped.entries) {
         buffer.writeln('${entry.key}:');
         for (final room in entry.value) {
           final status = room['status'] as String;
           final icon = status == 'clean' ? '🟢' : status == 'in_progress' ? '🟡' : '🔴';
-          buffer.writeln('  $icon Room ${room['number']} ($status)');
+          buffer.writeln('  $icon ${isRo ? 'Camera' : 'Room'} ${room['number']} ($status)');
         }
         buffer.writeln();
       }
       return buffer.toString();
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch floor data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele pe etaje. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch floor data. Please try again.';
     }
   }
 
-  Future<String> _roomDetail(String input) async {
-    final roomPattern = RegExp(r'room\s*([A-Za-z]?\d+)', caseSensitive: false);
-    final match = roomPattern.firstMatch(input);
-    if (match == null) return 'Please specify a room number, e.g., "room 101" or "room P01".';
+  Future<String> _roomDetail(String input, {bool isRo = false}) async {
+    final roomPatternEn = RegExp(r'room\s*([A-Za-z]?\d+)', caseSensitive: false);
+    final roomPatternRo = RegExp(r'camera\s*([A-Za-z]?\d+)', caseSensitive: false);
+    final match = roomPatternEn.firstMatch(input) ?? roomPatternRo.firstMatch(input);
+    if (match == null) {
+      return isRo
+          ? 'Te rog specifică numărul camerei, ex: "camera 101" sau "camera P01".'
+          : 'Please specify a room number, e.g., "room 101" or "room P01".';
+    }
 
     final roomNumber = match.group(1)!;
 
@@ -513,18 +650,22 @@ class ChatbotService {
         floor:floors(name, number)
       ''').eq('number', roomNumber).maybeSingle();
 
-      if (data == null) return 'Room $roomNumber not found.';
+      if (data == null) {
+        return isRo
+            ? 'Camera $roomNumber nu a fost găsită.'
+            : 'Room $roomNumber not found.';
+      }
 
-      final type = (data['room_type'] as Map<String, dynamic>?)?['name'] ?? 'Unknown';
+      final type = (data['room_type'] as Map<String, dynamic>?)?['name'] ?? (isRo ? 'Necunoscut' : 'Unknown');
       final floorData = data['floor'] as Map<String, dynamic>?;
-      final floor = floorData?['name'] as String? ?? 'Floor ${floorData?['number'] ?? '?'}';
+      final floor = floorData?['name'] as String? ?? '${isRo ? 'Etaj' : 'Floor'} ${floorData?['number'] ?? '?'}';
       final status = data['status'] as String;
       final statusIcon = status == 'clean' ? '🟢' : status == 'in_progress' ? '🟡' : '🔴';
 
-      final buffer = StringBuffer('**Room $roomNumber Details**\n\n');
-      buffer.writeln('Type: $type');
-      buffer.writeln('Floor: $floor');
-      buffer.writeln('Status: $statusIcon $status');
+      final buffer = StringBuffer('**${isRo ? 'Detalii Camera' : 'Room'} $roomNumber ${isRo ? '' : 'Details'}**\n\n');
+      buffer.writeln('${isRo ? 'Tip' : 'Type'}: $type');
+      buffer.writeln('${isRo ? 'Etaj' : 'Floor'}: $floor');
+      buffer.writeln('${isRo ? 'Status' : 'Status'}: $statusIcon $status');
 
       final notes = await _client
           .from('room_notes')
@@ -535,9 +676,9 @@ class ChatbotService {
 
       final notesList = notes as List;
       if (notesList.isNotEmpty) {
-        buffer.writeln('\nRecent Notes:');
+        buffer.writeln('\n${isRo ? 'Note recente' : 'Recent Notes'}:');
         for (final note in notesList) {
-          final author = (note['staff'] as Map<String, dynamic>?)?['name'] ?? 'Unknown';
+          final author = (note['staff'] as Map<String, dynamic>?)?['name'] ?? (isRo ? 'Necunoscut' : 'Unknown');
           buffer.writeln('  • "$author": ${note['content']}');
         }
       }
@@ -545,7 +686,9 @@ class ChatbotService {
       return buffer.toString();
     } catch (e) {
       debugPrint('Chatbot error: $e');
-      return 'Sorry, I couldn\'t fetch room data. Please try again.';
+      return isRo
+          ? 'Ne pare rău, nu am putut prelua datele camerei. Te rog încearcă din nou.'
+          : 'Sorry, I couldn\'t fetch room data. Please try again.';
     }
   }
 }

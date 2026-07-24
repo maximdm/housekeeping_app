@@ -137,7 +137,7 @@ class _AiChatPageState extends State<AiChatPage> {
         .eq('user_id', user.id)
         .maybeSingle();
     if (staffData != null && mounted) {
-      setState(() => _isAdmin = staffData['role'] == 'receptionist');
+      setState(() => _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager');
     } else if (mounted) {
       setState(() => _isAdmin = false);
     }
@@ -173,6 +173,39 @@ class _AiChatPageState extends State<AiChatPage> {
       _historyDate = null;
     });
     _loadTodayMessages();
+  }
+
+  void _clearChat() {
+    final savedMessages = List<ChatMessage>.from(_chatbot.messages);
+    setState(() {
+      _chatbot.clearHistory();
+      _chatbot.messages.add(ChatMessage(
+        id: 'welcome',
+        content: 'Hello! I\'m your housekeeping assistant. Ask me about:\n\n'
+            '• Room statuses\n'
+            '• Staff availability\n'
+            '• Recent activity\n\n'
+            'Type "help" for more options.',
+        isUser: false,
+        createdAt: DateTime.now(),
+      ));
+    });
+    showTimedSnackBar(
+      SnackBar(
+        content: const Text('Chat history cleared'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            setState(() {
+              _chatbot.messages
+                ..clear()
+                ..addAll(savedMessages);
+            });
+          },
+        ),
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   // --- Delete / Archive ---
@@ -340,99 +373,39 @@ class _AiChatPageState extends State<AiChatPage> {
     if (_isAdmin == null || _isAdmin!) {
       return AdminLayout(
         currentRoute: '/shared/chat/ai_chat',
-        title: _viewingHistory ? 'Chat History' : 'AI Assistant',
+        title: _viewingHistory ? localizations.tr('aiHistory') : localizations.tr('aiChatTitle'),
         appBarActions: _viewingHistory ? null : [
-          TextButton.icon(
-            icon: const Icon(Icons.history, size: 20),
-            label: const Text('History', style: TextStyle(fontSize: 13)),
-            onPressed: _openHistory,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () {
-              final savedMessages = List<ChatMessage>.from(_chatbot.messages);
-              setState(() {
-                _chatbot.clearHistory();
-                _chatbot.messages.add(ChatMessage(
-                  id: 'welcome',
-                  content: 'Hello! I\'m your housekeeping assistant. Ask me about:\n\n'
-                      '• Room statuses\n'
-                      '• Staff availability\n'
-                      '• Recent activity\n\n'
-                      'Type "help" for more options.',
-                  isUser: false,
-                  createdAt: DateTime.now(),
-                ));
-              });
-              showTimedSnackBar(
-                SnackBar(
-                  content: const Text('Chat history cleared'),
-                  action: SnackBarAction(
-                    label: 'Undo',
-                    onPressed: () {
-                      setState(() {
-                        _chatbot.messages
-                          ..clear()
-                          ..addAll(savedMessages);
-                      });
-                    },
-                  ),
-                  duration: const Duration(seconds: 5),
-                ),
-              );
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'history') _openHistory();
+              if (value == 'clear') _clearChat();
             },
-            tooltip: 'Clear chat',
-          ),
-        ],
-        scaffoldKey: _scaffoldKey,
-        endDrawer: _buildHistoryDrawer(),
-        child: body,
-      );
-    }
-    return StaffLayout(
-      currentTabIndex: 3,
-      title: _viewingHistory ? 'Chat History' : 'AI Assistant',
-      appBarActions: _viewingHistory ? null : [
-        TextButton.icon(
-          icon: const Icon(Icons.history, size: 20),
-          label: const Text('History', style: TextStyle(fontSize: 13)),
-          onPressed: _openHistory,
-        ),
-        IconButton(
-          icon: const Icon(Icons.delete_outline),
-          onPressed: () {
-            final savedMessages = List<ChatMessage>.from(_chatbot.messages);
-            setState(() {
-              _chatbot.clearHistory();
-              _chatbot.messages.add(ChatMessage(
-                id: 'welcome',
-                content: 'Hello! I\'m your housekeeping assistant. Ask me about:\n\n'
-                    '• Room statuses\n'
-                    '• Staff availability\n'
-                    '• Recent activity\n\n'
-                    'Type "help" for more options.',
-                isUser: false,
-                createdAt: DateTime.now(),
-              ));
-            });
-            showTimedSnackBar(
-              SnackBar(
-                content: const Text('Chat history cleared'),
-                action: SnackBarAction(
-                  label: 'Undo',
-                  onPressed: () {
-                    setState(() {
-                      _chatbot.messages
-                        ..clear()
-                        ..addAll(savedMessages);
-                    });
-                  },
-                ),
-                duration: const Duration(seconds: 5),
-              ),
-            );
-          },
-          tooltip: 'Clear chat',
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'history', child: Text(localizations.tr('aiHistory'))),
+                PopupMenuItem(value: 'clear', child: Text(localizations.tr('clearChat'))),
+              ],
+            ),
+          ],
+          scaffoldKey: _scaffoldKey,
+          endDrawer: _buildHistoryDrawer(),
+          child: body,
+        );
+      }
+      return StaffLayout(
+        currentTabIndex: 4,
+        title: _viewingHistory ? localizations.tr('aiHistory') : localizations.tr('aiChatTitle'),
+        appBarActions: _viewingHistory ? null : [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'history') _openHistory();
+              if (value == 'clear') _clearChat();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'history', child: Text(localizations.tr('aiHistory'))),
+              PopupMenuItem(value: 'clear', child: Text(localizations.tr('clearChat'))),
+            ],
         ),
       ],
       scaffoldKey: _scaffoldKey,
@@ -451,7 +424,7 @@ class _AiChatPageState extends State<AiChatPage> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Text(
-                'Chat History',
+                localizations.tr('aiHistory'),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -469,7 +442,7 @@ class _AiChatPageState extends State<AiChatPage> {
                             size: 48,
                             color: Colors.grey[400]),
                         const SizedBox(height: 12),
-                        Text('No past conversations',
+                        Text(localizations.tr('noMessages'),
                             style: TextStyle(color: Colors.grey[600])),
                       ],
                     ),
@@ -492,9 +465,9 @@ class _AiChatPageState extends State<AiChatPage> {
     final now = DateTime.now();
     String label;
     if (_isSameDay(group.date, now)) {
-      label = 'Today';
+      label = localizations.tr('today');
     } else if (_isSameDay(group.date, now.subtract(const Duration(days: 1)))) {
-      label = 'Yesterday';
+      label = localizations.tr('yesterday');
     } else {
       label = _formatDate(group.date);
     }
@@ -714,7 +687,7 @@ class _AiChatPageState extends State<AiChatPage> {
             ),
             const SizedBox(width: 8),
             Text(
-              'Thinking...',
+              localizations.tr('aiThinking'),
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 14,
@@ -745,7 +718,7 @@ class _AiChatPageState extends State<AiChatPage> {
                 controller: _controller,
                 focusNode: _focusNode,
                 decoration: InputDecoration(
-                  hintText: 'Ask about rooms, staff, activity...',
+                  hintText: localizations.tr('aiPlaceholder'),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                     borderSide: BorderSide.none,

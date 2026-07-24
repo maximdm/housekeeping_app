@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:routefly/routefly.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../main.dart';
 import '../../../models/floor.dart';
 import '../../../models/room.dart';
 import '../../../models/room_type.dart';
@@ -32,6 +34,7 @@ class _RoomFormPageState extends State<RoomFormPage> {
   @override
   void initState() {
     super.initState();
+    _detectRole();
     _editingRoom = RoomFormPage.pendingRoom;
     RoomFormPage.pendingRoom = null;
 
@@ -42,6 +45,21 @@ class _RoomFormPageState extends State<RoomFormPage> {
       _selectedFloorId = _editingRoom!.floorId;
     }
     _loadData();
+  }
+
+  Future<void> _detectRole() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    final data = await Supabase.instance.client
+        .from('staff')
+        .select('role')
+        .eq('user_id', user.id)
+        .maybeSingle();
+    if (mounted && data != null && data['role'] != 'manager') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Routefly.navigate('/admin/overview');
+      });
+    }
   }
 
   @override
@@ -96,7 +114,7 @@ class _RoomFormPageState extends State<RoomFormPage> {
       currentRoute: '/admin/rooms',
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_isEditing ? 'Edit Room' : 'Add Room'),
+          title: Text(_isEditing ? localizations.tr('editRoom') : localizations.tr('addRoom')),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Routefly.navigate('/admin/rooms'),
@@ -114,15 +132,15 @@ class _RoomFormPageState extends State<RoomFormPage> {
                   children: [
                     TextFormField(
                       controller: _numberController,
-                      decoration: const InputDecoration(
-                        labelText: 'Room Number',
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('roomNumber'),
                         hintText: 'e.g. 101',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.numbers),
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.numbers),
                       ),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
-                          return 'Please enter a room number';
+                          return localizations.tr('pleaseEnterRoomNumber');
                         }
                         return null;
                       },
@@ -130,10 +148,10 @@ class _RoomFormPageState extends State<RoomFormPage> {
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
                       initialValue: _selectedRoomTypeId,
-                      decoration: const InputDecoration(
-                        labelText: 'Room Type',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.category_outlined),
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('roomType'),
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.category_outlined),
                       ),
                       items: _roomService.roomTypes.map((RoomType type) {
                         return DropdownMenuItem(
@@ -144,17 +162,17 @@ class _RoomFormPageState extends State<RoomFormPage> {
                       onChanged: (value) =>
                           setState(() => _selectedRoomTypeId = value),
                       validator: (value) {
-                        if (value == null) return 'Please select a room type';
+                        if (value == null) return localizations.tr('pleaseSelectRoomType');
                         return null;
                       },
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
                       initialValue: _selectedFloorId,
-                      decoration: const InputDecoration(
-                        labelText: 'Floor',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.layers_outlined),
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('floor'),
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.layers_outlined),
                       ),
                       items: _roomService.floors.map((Floor floor) {
                         return DropdownMenuItem(
@@ -165,7 +183,7 @@ class _RoomFormPageState extends State<RoomFormPage> {
                       onChanged: (value) =>
                           setState(() => _selectedFloorId = value),
                       validator: (value) {
-                        if (value == null) return 'Please select a floor';
+                        if (value == null) return localizations.tr('pleaseSelectFloor');
                         return null;
                       },
                     ),
@@ -173,10 +191,10 @@ class _RoomFormPageState extends State<RoomFormPage> {
                     TextFormField(
                       controller: _descriptionController,
                       maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Description (optional)',
-                        hintText: 'e.g. Corner room with sea view',
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('descriptionOptional'),
+                        hintText: localizations.tr('descriptionHint'),
+                        border: const OutlineInputBorder(),
                         alignLabelWithHint: true,
                       ),
                     ),
@@ -191,7 +209,7 @@ class _RoomFormPageState extends State<RoomFormPage> {
                                   CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Text(
-                              _isEditing ? 'Save Changes' : 'Add Room'),
+                              _isEditing ? localizations.tr('saveChanges') : localizations.tr('addRoom')),
                     ),
                   ],
                 ),

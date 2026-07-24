@@ -25,12 +25,12 @@ class StaffLayout extends StatelessWidget {
     this.scaffoldKey,
   });
 
-  static const _tabs = [
-    _TabItem('Tasks', Icons.checklist_outlined, Icons.checklist, 0),
-    _TabItem('Rooms', Icons.meeting_room_outlined, Icons.meeting_room, 1),
-    _TabItem('Chat', Icons.chat_outlined, Icons.chat, 2),
-    _TabItem('AI', Icons.smart_toy_outlined, Icons.smart_toy, 3),
-    _TabItem('Notes', Icons.notes_outlined, Icons.notes, 4),
+  static final _tabs = [
+    _TabItem('tasks', Icons.checklist_outlined, Icons.checklist, 0),
+    _TabItem('notes', Icons.notes_outlined, Icons.notes, 1),
+    _TabItem('rooms', Icons.meeting_room_outlined, Icons.meeting_room, 2),
+    _TabItem('chat', Icons.chat_outlined, Icons.chat, 3),
+    _TabItem('aiChat', Icons.smart_toy_outlined, Icons.smart_toy, 4),
   ];
 
   void _onTabTapped(BuildContext context, int index) {
@@ -39,16 +39,16 @@ class StaffLayout extends StatelessWidget {
         Routefly.navigate('/staff/home/staff_dashboard');
         break;
       case 1:
-        Routefly.navigate('/staff/home/staff_rooms');
+        Routefly.navigate('/shared/notes');
         break;
       case 2:
-        Routefly.navigate('/shared/chat');
+        Routefly.navigate('/staff/home/staff_rooms');
         break;
       case 3:
-        Routefly.navigate('/shared/chat/ai_chat');
+        Routefly.navigate('/shared/chat');
         break;
       case 4:
-        Routefly.navigate('/shared/notes');
+        Routefly.navigate('/shared/chat/ai_chat');
         break;
     }
   }
@@ -58,7 +58,7 @@ class StaffLayout extends StatelessWidget {
     return Scaffold(
       key: scaffoldKey,
       appBar: AppBar(
-        title: Text(title ?? 'Housekeeping'),
+        title: Text(title ?? localizations.tr('housekeeping')),
         automaticallyImplyLeading: false,
         actions: [
           ...?appBarActions,
@@ -68,19 +68,12 @@ class StaffLayout extends StatelessWidget {
                   ? Icons.light_mode_outlined
                   : Icons.dark_mode_outlined,
             ),
-            tooltip: 'Toggle Theme',
+            tooltip: localizations.tr('toggleTheme'),
             onPressed: () => themeService.toggle(),
           ),
           IconButton(
-            icon: const Icon(Icons.lock_outline),
-            tooltip: 'Change Password',
-            onPressed: () {
-              Routefly.navigate('/staff/settings/change_password');
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.logout),
-            tooltip: 'Sign Out',
+            tooltip: localizations.tr('signOut'),
             onPressed: () async {
               await Supabase.instance.client.auth.signOut();
               if (context.mounted) {
@@ -101,7 +94,7 @@ class StaffLayout extends StatelessWidget {
               (tab) => NavigationDestination(
                 icon: Icon(tab.icon),
                 selectedIcon: Icon(tab.activeIcon),
-                label: tab.label,
+                label: localizations.tr(tab.labelKey),
               ),
             )
             .toList(),
@@ -111,10 +104,10 @@ class StaffLayout extends StatelessWidget {
 }
 
 class _TabItem {
-  final String label;
+  final String labelKey;
   final IconData icon;
   final IconData activeIcon;
   final int index;
 
-  const _TabItem(this.label, this.icon, this.activeIcon, this.index);
+  const _TabItem(this.labelKey, this.icon, this.activeIcon, this.index);
 }

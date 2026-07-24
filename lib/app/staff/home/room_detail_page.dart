@@ -55,11 +55,8 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
       if (staffData == null) return;
       _staffId = staffData['id'] as String;
 
-      // TODO: Get room from route arguments when routefly supports it
-      // For now, load the first assigned room
-      final assignments = await _assignmentService.loadMyAssignments(_staffId!);
-      if (assignments.isNotEmpty && assignments.first.room != null) {
-        _room = assignments.first.room;
+      _room = StaffSelectedRoom.instance;
+      if (_room != null) {
         _notes = await _assignmentService.loadNotes(_room!.id);
       }
     } catch (e) {
@@ -86,7 +83,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
       });
 
       showTimedSnackBar(SnackBar(
-        content: Text('Room status updated to ${newStatus.label}'),
+        content: Text(localizations.tr('roomStatusUpdated').replaceAll('{status}', newStatus.label)),
         backgroundColor: newStatus.color,
       ));
     } else {
@@ -120,7 +117,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
       child: _loading
           ? const Center(child: CircularProgressIndicator())
           : _room == null
-              ? const Center(child: Text('No room assigned'))
+              ? Center(child: Text(localizations.tr('noRoomAssigned')))
               : _buildContent(),
     );
   }
@@ -176,14 +173,14 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Room ${_room!.number}',
+                    localizations.tr('roomLabel').replaceAll('{number}', _room!.number),
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${_room!.roomTypeName ?? 'Room'} · ${_room!.floorName ?? ''}',
+                    '${_room!.roomTypeName ?? localizations.tr('room')} · ${_room!.floorName ?? ''}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Colors.grey[600],
                         ),
@@ -210,7 +207,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Status',
+              localizations.tr('status'),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -273,7 +270,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Notes',
+              localizations.tr('notes_'),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -284,11 +281,11 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
                 Expanded(
                   child: TextField(
                     controller: _noteController,
-                    decoration: const InputDecoration(
-                      hintText: 'Add a note...',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      hintText: localizations.tr('addNoteHint'),
+                      border: const OutlineInputBorder(),
                       contentPadding:
-                          EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                     ),
                     maxLines: null,
                   ),
@@ -334,14 +331,14 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Delete note?'),
-            content: const Text('This action can be undone.'),
+            title: Text(localizations.tr('deleteNoteQuestion')),
+            content: Text(localizations.tr('thisActionUndone')),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(localizations.tr('cancel'))),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
-                child: const Text('Delete'),
+                child: Text(localizations.tr('delete')),
               ),
             ],
           ),
@@ -400,7 +397,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    note.staffName ?? 'Staff',
+                    note.staffName ?? localizations.tr('staffFallback'),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
@@ -466,14 +463,14 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete note?'),
-        content: const Text('This action can be undone.'),
+        title: Text(localizations.tr('deleteNoteQuestion')),
+        content: Text(localizations.tr('thisActionUndone')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(localizations.tr('cancel'))),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Delete'),
+            child: Text(localizations.tr('delete')),
           ),
         ],
       ),
@@ -488,9 +485,9 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
     if (mounted) {
       Timer? undoTimer;
       showTimedSnackBar(SnackBar(
-        content: const Text('Note deleted'),
+        content: Text(localizations.tr('noteDeleted')),
         action: SnackBarAction(
-          label: 'Undo',
+          label: localizations.tr('undo'),
           onPressed: () {
             undoTimer?.cancel();
             _assignmentService.restoreNote(
@@ -541,7 +538,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('Set status', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                child: Text(localizations.tr('setNoteStatus'), style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
               ),
             ),
             ...noteStatusConfig.entries.map((entry) {
@@ -592,7 +589,7 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Edit Note',
+                localizations.tr('editNoteTitle'),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -600,18 +597,18 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
               const SizedBox(height: 16),
               TextField(
                 controller: titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: localizations.tr('noteTitleLabel'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: contentController,
                 maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: localizations.tr('noteDescriptionLabel'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 16),
@@ -630,11 +627,11 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
                     _notes = await _assignmentService.loadNotes(_room!.id);
                     if (mounted) {
                       setState(() {});
-                      showTimedSnackBar(const SnackBar(content: Text('Note updated')));
+                      showTimedSnackBar(SnackBar(content: Text(localizations.tr('noteUpdated'))));
                     }
                   }
                 },
-                child: const Text('Save'),
+                child: Text(localizations.tr('save')),
               ),
             ],
           ),
@@ -646,8 +643,8 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
   String _formatTime(DateTime dateTime) {
     final now = DateTime.now();
     final diff = now.difference(dateTime);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inMinutes < 60) return localizations.tr('minutesAgo').replaceAll('{minutes}', '${diff.inMinutes}');
+    if (diff.inHours < 24) return localizations.tr('hoursAgo').replaceAll('{hours}', '${diff.inHours}');
     return '${dateTime.day}/${dateTime.month} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 }

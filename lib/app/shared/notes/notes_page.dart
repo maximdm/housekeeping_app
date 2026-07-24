@@ -4,12 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../models/room.dart';
+import '../../../models/shared_note.dart';
+import '../../../models/staff_note.dart';
 import '../../../models/todo_item.dart';
 import '../../../models/todo_list_item.dart';
 import '../../../main.dart';
 import '../../../services/assignment_service.dart';
 import '../../../services/room_service.dart';
+import '../../../models/staff_member.dart';
 import '../../../services/staff_service.dart';
+import '../../../widgets/sharing_section.dart';
 import '../../../layouts/admin_layout.dart';
 import '../../../layouts/staff_layout.dart';
 
@@ -20,21 +24,30 @@ class NotesPage extends StatefulWidget {
   State<NotesPage> createState() => _NotesPageState();
 }
 
-class _NotesPageState extends State<NotesPage> {
+class _NotesPageState extends State<NotesPage> with SingleTickerProviderStateMixin {
   final AssignmentService _assignmentService = AssignmentService();
   final RoomService _roomService = RoomService();
   final List<Timer> _pendingTimers = [];
+  final ValueNotifier<bool> _saving = ValueNotifier(false);
 
   String? _staffId;
   bool _loading = true;
   bool? _isAdmin;
+  bool _isManager = false;
 
   List<RoomNote> _notes = [];
-  List<RoomNote> _forwardedNotes = [];
   List<TodoItem> _todos = [];
   final Map<String, List<TodoListItem>> _listItems = {};
   final Map<String, bool> _expandedLists = {};
-  List<Assignment> _assignments = [];
+  List<Room> _assignedRooms = [];
+
+  List<SharedNote> _receivedNotes = [];
+  int _unreadCount = 0;
+
+  List<StaffNote> _staffNotes = [];
+  List<StaffNote> _receivedStaffNotes = [];
+
+  TabController? _tabController;
 
   @override
   void initState() {
@@ -47,7 +60,32 @@ class _NotesPageState extends State<NotesPage> {
     for (final t in _pendingTimers) {
       t.cancel();
     }
+    _tabController?.removeListener(_onTabChanged);
+    _tabController?.dispose();
     super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (_tabController?.index == 1 && _staffId != null) {
+      for (final note in _receivedNotes.where((n) => !n.isRead)) {
+        _assignmentService.markAsRead(note.noteType, note.noteId, _staffId!);
+      }
+      setState(() {
+        _unreadCount = 0;
+        _receivedNotes = _receivedNotes.map((n) =>
+            SharedNote(
+              noteId: n.noteId,
+              noteType: n.noteType,
+              isRead: true,
+              sharedByName: n.sharedByName,
+              roomNumber: n.roomNumber,
+              noteTitle: n.noteTitle,
+              noteContent: n.noteContent,
+              noteStatus: n.noteStatus,
+              sharedAt: n.sharedAt,
+            )).toList();
+      });
+    }
   }
 
   Future<void> _detectRoleAndLoad() async {
@@ -67,7 +105,14 @@ class _NotesPageState extends State<NotesPage> {
     }
     if (!mounted) return;
     _staffId = staffData['id'] as String;
-    _isAdmin = staffData['role'] == 'receptionist';
+    _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager';
+    _isManager = staffData['role'] == 'manager';
+    final tabLength = _isManager ? 3 : 2;
+    _tabController = TabController(length: tabLength, vsync: this);
+    _tabController!.addListener(_onTabChanged);
+    if (!_isAdmin!) {
+      _tabController!.index = 1;
+    }
     setState(() {});
     await _loadData();
   }
@@ -86,7 +131,7 @@ class _NotesPageState extends State<NotesPage> {
 
         if (staffData == null) return;
         _staffId = staffData['id'] as String;
-        _isAdmin = staffData['role'] == 'receptionist';
+        _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager';
       }
 
       _todos = await _assignmentService.loadTodos(_staffId!);
@@ -101,16 +146,24 @@ class _NotesPageState extends State<NotesPage> {
         await _roomService.loadRooms();
         _notes = await _assignmentService.loadRecentNotes(limit: 50);
       } else {
-        _assignments = await _assignmentService.loadMyAssignments(_staffId!);
-        for (final a in _assignments) {
-          if (a.room != null) {
-            final roomNotes = await _assignmentService.loadNotes(a.room!.id);
-            _notes.addAll(roomNotes);
-          }
+        _assignedRooms = await _assignmentService.loadMyDirtyRoomsForDate(
+          _staffId!,
+          DateTime.now(),
+        );
+        for (final room in _assignedRooms) {
+          final roomNotes = await _assignmentService.loadNotes(room.id);
+          _notes.addAll(roomNotes);
         }
         _notes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        _forwardedNotes = await _assignmentService.loadForwardedNotes(_staffId!);
       }
+
+      _receivedNotes = await _assignmentService.loadReceivedNotes(_staffId!);
+      _unreadCount = _receivedNotes.where((n) => !n.isRead).length;
+
+      if (_isManager) {
+        _staffNotes = await _assignmentService.loadStaffNotesCreatedBy(_staffId!);
+      }
+      _receivedStaffNotes = await _assignmentService.loadReceivedStaffNotes(_staffId!);
     } catch (e) {
       debugPrint('Error loading notes data: $e');
     }
@@ -136,7 +189,7 @@ class _NotesPageState extends State<NotesPage> {
       );
     }
     return StaffLayout(
-      currentTabIndex: 4,
+      currentTabIndex: 1,
       title: 'Notes & To-Dos',
       floatingActionButton: _buildFab(),
       child: body,
@@ -144,23 +197,79 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   Widget _buildContent() {
+    return Column(
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            labelColor: Theme.of(context).colorScheme.primary,
+            unselectedLabelColor: Colors.grey[600],
+            indicatorColor: Theme.of(context).colorScheme.primary,
+            indicatorSize: TabBarIndicatorSize.label,
+            tabs: [
+              const Tab(text: 'My Notes'),
+              Tab(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Received'),
+                    if (_unreadCount > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.error,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$_unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (_isManager) const Tab(text: 'Staff Notes'),
+            ],
+          ),
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildMyNotesTab(),
+              _buildReceivedNotesTab(),
+              if (_isManager) _buildStaffNotesTab(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMyNotesTab() {
     final hasNotes = _notes.isNotEmpty;
     final hasTodos = _todos.isNotEmpty;
-    final hasForwarded = _forwardedNotes.isNotEmpty;
 
-    if (!hasNotes && !hasTodos && !hasForwarded) {
+    if (!hasNotes && !hasTodos) {
       return _buildEmptyState();
     }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       children: [
-        if (hasForwarded) ...[
-          _buildSectionHeader('Forwarded to me', Icons.forward_to_inbox),
-          const SizedBox(height: 8),
-          ..._forwardedNotes.map((note) => _buildNoteCard(note, isForwarded: true)),
-          const SizedBox(height: 16),
-        ],
         if (hasTodos) ...[
           _buildSectionHeader('To-Do Lists', Icons.checklist),
           const SizedBox(height: 8),
@@ -168,11 +277,241 @@ class _NotesPageState extends State<NotesPage> {
           const SizedBox(height: 16),
         ],
         if (hasNotes) ...[
-          _buildSectionHeader('Room Notes', Icons.notes),
+          _buildSectionHeader(localizations.tr('roomNotes'), Icons.notes),
           const SizedBox(height: 8),
           ..._notes.map((note) => _buildNoteCard(note)),
         ],
       ],
+    );
+  }
+
+  Widget _buildReceivedNotesTab() {
+    final hasNotes = _receivedNotes.isNotEmpty;
+    final hasStaffNotes = _receivedStaffNotes.isNotEmpty;
+
+    if (!hasNotes && !hasStaffNotes) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.inbox_outlined,
+              size: 64,
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No received notes',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Colors.grey[600],
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Notes shared with you will appear here',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[500],
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final totalItems = _receivedNotes.length + _receivedStaffNotes.length;
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      itemCount: totalItems + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _confirmClearAllReceived(),
+                  icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                  label: const Text('Clear All'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        if (index - 1 < _receivedNotes.length) {
+          final note = _receivedNotes[index - 1];
+          return _buildReceivedNoteCard(note);
+        }
+        final staffIndex = index - 1 - _receivedNotes.length;
+        return _buildStaffNoteCard(_receivedStaffNotes[staffIndex]);
+      },
+    );
+  }
+
+  Widget _buildStaffNotesTab() {
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          TabBar(
+            labelColor: Theme.of(context).colorScheme.primary,
+            unselectedLabelColor: Colors.grey[600],
+            indicatorColor: Theme.of(context).colorScheme.primary,
+            indicatorSize: TabBarIndicatorSize.label,
+            tabs: [
+              Tab(text: localizations.tr('sent')),
+              Tab(text: localizations.tr('received')),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _buildSentStaffNotes(),
+                _buildReceivedStaffNotes(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSentStaffNotes() {
+    if (_staffNotes.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.send_outlined,
+                size: 64,
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5)),
+            const SizedBox(height: 16),
+            Text(localizations.tr('noSentNotes'),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.grey[600],
+                    )),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      itemCount: _staffNotes.length,
+      itemBuilder: (context, index) =>
+          _buildStaffNoteCard(_staffNotes[index]),
+    );
+  }
+
+  Widget _buildReceivedStaffNotes() {
+    if (_receivedStaffNotes.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inbox_outlined,
+                size: 64,
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5)),
+            const SizedBox(height: 16),
+            Text(localizations.tr('noStaffNotes'),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.grey[600],
+                    )),
+            const SizedBox(height: 8),
+            Text(localizations.tr('staffNotesEmptyHint'),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.grey[500],
+                    )),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      itemCount: _receivedStaffNotes.length,
+      itemBuilder: (context, index) =>
+          _buildStaffNoteCard(_receivedStaffNotes[index]),
+    );
+  }
+
+  Widget _buildStaffNoteCard(StaffNote note) {
+    final isMine = note.createdBy == _staffId;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _showStaffNoteDetail(note),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.person_pin_outlined,
+                      size: 16, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(note.title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                  if (isMine)
+                    PopupMenuButton<String>(
+                      itemBuilder: (ctx) => [
+                        PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete_outline,
+                                    size: 18,
+                                    color: Theme.of(context).colorScheme.error),
+                                const SizedBox(width: 8),
+                                Text(localizations.tr('delete')),
+                              ],
+                            )),
+                      ],
+                      onSelected: (v) {
+                        if (v == 'delete') _confirmDeleteStaffNote(note);
+                      },
+                    ),
+                ],
+              ),
+              if (note.content.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(note.content,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text(
+                    isMine
+                        ? '${localizations.tr('sentTo')}: ${note.sharedWithNames.join(', ')}'
+                        : '${localizations.tr('from')}: ${note.createdByName ?? '-'}',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  const Spacer(),
+                  Text(_formatTime(note.createdAt),
+                      style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -217,6 +556,282 @@ class _NotesPageState extends State<NotesPage> {
               ),
         ),
       ],
+    );
+  }
+
+  Widget _buildReceivedNoteCard(SharedNote note) {
+    final isUnread = !note.isRead;
+    final statusCfg = noteStatusConfig[note.noteStatus ?? 'none'] ?? noteStatusConfig['none']!;
+    final statusColor = statusCfg['color'] as Color;
+
+    return Dismissible(
+      key: ValueKey('${note.noteType}_${note.noteId}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.error,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
+      ),
+      confirmDismiss: (_) async {
+        return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Remove Note'),
+            content: const Text('Remove this shared note from your list?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(localizations.tr('cancel')),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Remove'),
+              ),
+            ],
+          ),
+        );
+      },
+      onDismissed: (_) async {
+        final staffId = _staffId ?? await _assignmentService.getStaffId();
+        if (staffId == null) return;
+        await _assignmentService.removeReceivedShare(
+          noteType: note.noteType,
+          noteId: note.noteId,
+          sharedWithStaffId: staffId,
+        );
+        setState(() {
+          _receivedNotes.removeWhere((n) =>
+              n.noteType == note.noteType && n.noteId == note.noteId);
+          if (!note.isRead) _unreadCount = (_unreadCount - 1).clamp(0, 999);
+        });
+        if (mounted) {
+          showTimedSnackBar(const SnackBar(content: Text('Note removed')));
+        }
+      },
+      child: Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(
+          color: isUnread
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.5)
+              : Theme.of(context).colorScheme.outlineVariant,
+          width: isUnread ? 1.5 : 1,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _onReceivedNoteTap(note),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  if (isUnread)
+                    Container(
+                      width: 8,
+                      height: 8,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(statusCfg['icon'] as IconData, size: 12, color: statusColor),
+                        const SizedBox(width: 3),
+                        Text(
+                          statusCfg['label'] as String,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: statusColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: note.noteType == 'todo'
+                          ? Colors.orange.withValues(alpha: 0.12)
+                          : Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      note.noteType == 'todo' ? localizations.tr('toDo') : localizations.tr('roomNotes'),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: note.noteType == 'todo'
+                            ? Colors.orange[700]
+                            : Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                  if (note.roomNumber != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Room ${note.roomNumber}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
+                  Text(
+                    _formatTime(note.sharedAt),
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  const SizedBox(width: 4),
+                  GestureDetector(
+                    onTap: () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Remove Note'),
+                          content: const Text('Remove this shared note from your list?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: Text(localizations.tr('cancel')),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Theme.of(context).colorScheme.error,
+                              ),
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text('Remove'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed != true) return;
+                      final staffId = _staffId ?? await _assignmentService.getStaffId();
+                      if (staffId == null) return;
+                      await _assignmentService.removeReceivedShare(
+                        noteType: note.noteType,
+                        noteId: note.noteId,
+                        sharedWithStaffId: staffId,
+                      );
+                      setState(() {
+                        _receivedNotes.removeWhere((n) =>
+                            n.noteType == note.noteType && n.noteId == note.noteId);
+                        if (!note.isRead) _unreadCount = (_unreadCount - 1).clamp(0, 999);
+                      });
+                      if (mounted) {
+                        showTimedSnackBar(const SnackBar(content: Text('Note removed')));
+                      }
+                    },
+                    child: Icon(Icons.delete_outline,
+                        size: 18, color: Colors.grey[400]),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (note.noteTitle != null && note.noteTitle!.isNotEmpty)
+                Text(
+                  note.noteTitle!,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                ),
+              if (note.noteContent != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  note.noteContent!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.person_outline, size: 14, color: Colors.grey[500]),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Shared by ${note.sharedByName}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+
+  void _onReceivedNoteTap(SharedNote note) {
+    if (_staffId != null && !note.isRead) {
+      _assignmentService.markAsRead(note.noteType, note.noteId, _staffId!);
+    }
+  }
+
+  void _confirmClearAllReceived() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear All Notes'),
+        content: Text('Remove all ${_receivedNotes.length} shared notes from your list?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(localizations.tr('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final staffId = _staffId ?? await _assignmentService.getStaffId();
+              if (staffId == null) return;
+              await _assignmentService.clearAllReceivedNotes(staffId);
+              setState(() {
+                _receivedNotes.clear();
+                _unreadCount = 0;
+              });
+              if (mounted) {
+                showTimedSnackBar(const SnackBar(content: Text('All shared notes cleared')));
+              }
+            },
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -290,6 +905,11 @@ class _NotesPageState extends State<NotesPage> {
                       ),
                     ),
                   IconButton(
+                    icon: const Icon(Icons.share_outlined, size: 20),
+                    color: Colors.grey[400],
+                    onPressed: () => _showShareDialogForTodo(todo),
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.delete_outline, size: 20),
                     color: Theme.of(context).colorScheme.error,
                     onPressed: () => _confirmDeleteTodo(todo),
@@ -319,7 +939,6 @@ class _NotesPageState extends State<NotesPage> {
       );
     }
 
-    // Single todo (legacy style)
     return Dismissible(
       key: ValueKey(todo.id),
       direction: DismissDirection.endToStart,
@@ -347,7 +966,7 @@ class _NotesPageState extends State<NotesPage> {
             SnackBar(
               content: Text('To-do "${deletedTodo.title}" deleted'),
               action: SnackBarAction(
-                label: 'Undo',
+                label: localizations.tr('undo'),
                 onPressed: () {
                   undoTimer?.cancel();
                   setState(() {
@@ -393,6 +1012,16 @@ class _NotesPageState extends State<NotesPage> {
               ),
             ),
           ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.share_outlined, size: 20),
+                color: Colors.grey[400],
+                onPressed: () => _showShareDialogForTodo(todo),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -422,7 +1051,7 @@ class _NotesPageState extends State<NotesPage> {
             SnackBar(
               content: Text('Item "${deletedItem.title}" deleted'),
               action: SnackBarAction(
-                label: 'Undo',
+                label: localizations.tr('undo'),
                 onPressed: () {
                   undoTimer?.cancel();
                   setState(() {
@@ -533,14 +1162,14 @@ class _NotesPageState extends State<NotesPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: Text(localizations.tr('cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: Text(localizations.tr('delete')),
           ),
         ],
       ),
@@ -559,7 +1188,7 @@ class _NotesPageState extends State<NotesPage> {
             SnackBar(
               content: Text('To-do "${deletedTodo.title}" deleted'),
               action: SnackBarAction(
-                label: 'Undo',
+                label: localizations.tr('undo'),
                 onPressed: () {
                   undoTimer?.cancel();
                   setState(() {
@@ -585,128 +1214,20 @@ class _NotesPageState extends State<NotesPage> {
     });
   }
 
-  // --- Forward Note ---
-
-  void _showForwardDialog(RoomNote note) async {
-    final staffService = StaffService();
-    await staffService.loadStaff();
-    final activeStaff = staffService.staff.where((s) => s.isActive).toList();
-
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40, height: 4,
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Forward note to...',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                ),
-              ),
-              if (note.forwardedTo != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Currently forwarded to: ${note.forwardedToName ?? 'Unknown'}',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: activeStaff.map((member) {
-                    final isCurrentForward = note.forwardedTo == member.id;
-                    return ListTile(
-                      leading: CircleAvatar(
-                        radius: 16,
-                        backgroundColor: isCurrentForward
-                            ? Colors.deepPurple.withValues(alpha: 0.15)
-                            : Theme.of(context).colorScheme.surfaceContainerHighest,
-                        child: Text(
-                          member.name.isNotEmpty ? member.name[0].toUpperCase() : '?',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: isCurrentForward ? Colors.deepPurple : null,
-                          ),
-                        ),
-                      ),
-                      title: Text(
-                        member.name,
-                        style: TextStyle(
-                          fontWeight: isCurrentForward ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                      subtitle: Text(
-                        member.role.label,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      trailing: isCurrentForward
-                          ? const Icon(Icons.check_circle, color: Colors.deepPurple, size: 20)
-                          : null,
-                      onTap: () async {
-                        Navigator.pop(ctx);
-                        final ok = await _assignmentService.forwardNote(
-                          noteId: note.id,
-                          staffId: member.id,
-                        );
-                        if (ok && mounted) {
-                          showTimedSnackBar(
-                            SnackBar(content: Text('Note forwarded to ${member.name}')),
-                          );
-                          _loadData();
-                        }
-                      },
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   // --- Delete Note (shared by Dismissible and icon) ---
 
   void _deleteNote(RoomNote note) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete note?'),
+        title: Text(localizations.tr('deleteNoteConfirm')),
         content: const Text('This can be undone from the undo bar.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(localizations.tr('cancel'))),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Delete'),
+            child: Text(localizations.tr('delete')),
           ),
         ],
       ),
@@ -724,7 +1245,7 @@ class _NotesPageState extends State<NotesPage> {
         SnackBar(
           content: const Text('Note deleted'),
           action: SnackBarAction(
-            label: 'Undo',
+            label: localizations.tr('undo'),
             onPressed: () {
               undoTimer?.cancel();
               setState(() => _notes.insert(0, deletedNote));
@@ -807,14 +1328,14 @@ class _NotesPageState extends State<NotesPage> {
 
   // --- Note Cards ---
 
-  Widget _buildNoteCard(RoomNote note, {bool isForwarded = false}) {
+  Widget _buildNoteCard(RoomNote note) {
     String roomNumber = '';
     if (_isAdmin!) {
       final room = _roomService.rooms.where((r) => r.id == note.roomId).toList();
       if (room.isNotEmpty) roomNumber = room.first.number;
     } else {
-      final match = _assignments.where((a) => a.roomId == note.roomId && a.room != null);
-      if (match.isNotEmpty) roomNumber = match.first.room!.number;
+      final match = _assignedRooms.where((r) => r.id == note.roomId);
+      if (match.isNotEmpty) roomNumber = match.first.number;
     }
 
     final statusCfg = noteStatusConfig[note.status] ?? noteStatusConfig['none']!;
@@ -827,12 +1348,10 @@ class _NotesPageState extends State<NotesPage> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         side: BorderSide(
-          color: isForwarded
-              ? Colors.deepPurple.withValues(alpha: 0.5)
-              : note.status != 'none'
-                  ? statusColor.withValues(alpha: 0.4)
-                  : Theme.of(context).colorScheme.outlineVariant,
-          width: isForwarded ? 1.5 : note.status != 'none' ? 1.5 : 1,
+          color: note.status != 'none'
+              ? statusColor.withValues(alpha: 0.4)
+              : Theme.of(context).colorScheme.outlineVariant,
+          width: note.status != 'none' ? 1.5 : 1,
         ),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -843,60 +1362,34 @@ class _NotesPageState extends State<NotesPage> {
           children: [
             Row(
               children: [
-                if (isForwarded) ...[
-                  Container(
+                GestureDetector(
+                  onTap: () => _showStatusPicker(note),
+                  child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.deepPurple.withValues(alpha: 0.12),
+                      color: statusColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.forward_to_inbox, size: 12, color: Colors.deepPurple),
-                        SizedBox(width: 3),
+                        Icon(statusIcon, size: 12, color: statusColor),
+                        const SizedBox(width: 3),
                         Text(
-                          'Forwarded',
+                          statusLabel,
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: Colors.deepPurple,
+                            color: statusColor,
                           ),
                         ),
+                        const SizedBox(width: 2),
+                        Icon(Icons.arrow_drop_down, size: 14, color: statusColor),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                ] else ...[
-                  GestureDetector(
-                    onTap: () => _showStatusPicker(note),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(statusIcon, size: 12, color: statusColor),
-                          const SizedBox(width: 3),
-                          Text(
-                            statusLabel,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: statusColor,
-                            ),
-                          ),
-                          const SizedBox(width: 2),
-                          Icon(Icons.arrow_drop_down, size: 14, color: statusColor),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                ],
+                ),
+                const SizedBox(width: 8),
                 if (roomNumber.isNotEmpty) ...[
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -927,13 +1420,11 @@ class _NotesPageState extends State<NotesPage> {
                   _formatTime(note.createdAt),
                   style: TextStyle(color: Colors.grey[500], fontSize: 12),
                 ),
-                if (_isAdmin!) ...[
-                  const SizedBox(width: 4),
-                  GestureDetector(
-                    onTap: () => _showForwardDialog(note),
-                    child: Icon(Icons.forward_to_inbox, size: 18, color: note.forwardedTo != null ? Colors.deepPurple : Colors.grey[400]),
-                  ),
-                ],
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onTap: () => _showShareDialog(note),
+                  child: Icon(Icons.share_outlined, size: 18, color: Colors.grey[400]),
+                ),
                 const SizedBox(width: 4),
                 GestureDetector(
                   onTap: () => _showEditNoteDialog(note),
@@ -989,14 +1480,14 @@ class _NotesPageState extends State<NotesPage> {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Delete note?'),
+            title: Text(localizations.tr('deleteNoteConfirm')),
             content: const Text('This can be undone from the undo bar.'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(localizations.tr('cancel'))),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
-                child: const Text('Delete'),
+                child: Text(localizations.tr('delete')),
               ),
             ],
           ),
@@ -1012,13 +1503,209 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
+  // --- Share Dialog ---
+
+  Widget _buildSharingSectionForDialog({
+    required SharingMode shareMode,
+    required List<String> selectedStaffIds,
+    required ValueChanged<SharingMode> onModeChanged,
+    required ValueChanged<List<String>> onStaffIdsChanged,
+  }) {
+    return FutureBuilder<List<StaffMember>>(
+      future: _loadActiveStaff(),
+      builder: (ctx, snapshot) {
+        if (!snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return SharingSection(
+          initialMode: shareMode,
+          initialStaffIds: selectedStaffIds,
+          availableStaff: snapshot.data!,
+          onModeChanged: onModeChanged,
+          onStaffIdsChanged: onStaffIdsChanged,
+        );
+      },
+    );
+  }
+
+  Future<List<StaffMember>> _loadActiveStaff() async {
+    final staffService = StaffService();
+    await staffService.loadStaff();
+    return staffService.staff.where((s) => s.isActive).toList();
+  }
+
+  void _showShareDialogForTodo(TodoItem todo) async {
+    final activeStaff = await _loadActiveStaff();
+
+    if (!mounted) return;
+
+    SharingMode shareMode = SharingMode.none;
+    List<String> selectedStaffIds = [];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Share To-Do',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    todo.title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SharingSection(
+                    initialMode: shareMode,
+                    initialStaffIds: selectedStaffIds,
+                    availableStaff: activeStaff,
+                    onModeChanged: (mode) => setSheetState(() => shareMode = mode),
+                    onStaffIdsChanged: (ids) => setSheetState(() => selectedStaffIds = ids),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () async {
+                      final staffId = _staffId ?? await _assignmentService.getStaffId();
+                      if (staffId == null) return;
+
+                      if (shareMode == SharingMode.none) {
+                        await _assignmentService.unshareNote(
+                          noteType: 'todo',
+                          noteId: todo.id,
+                        );
+                      } else {
+                        await _assignmentService.shareNote(
+                          noteType: 'todo',
+                          noteId: todo.id,
+                          sharedWithStaffIds: selectedStaffIds,
+                          sharedByStaffId: staffId,
+                        );
+                      }
+
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        showTimedSnackBar(
+                          const SnackBar(content: Text('Sharing updated')),
+                        );
+                      }
+                    },
+                    child: Text(localizations.tr('save')),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showShareDialog(RoomNote note) async {
+    final staffService = StaffService();
+    await staffService.loadStaff();
+    final activeStaff = staffService.staff.where((s) => s.isActive).toList();
+
+    if (!mounted) return;
+
+    SharingMode shareMode = SharingMode.none;
+    List<String> selectedStaffIds = [];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Share Note',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 16),
+                  SharingSection(
+                    initialMode: shareMode,
+                    initialStaffIds: selectedStaffIds,
+                    availableStaff: activeStaff,
+                    onModeChanged: (mode) => setSheetState(() => shareMode = mode),
+                    onStaffIdsChanged: (ids) => setSheetState(() => selectedStaffIds = ids),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () async {
+                      final staffId = _staffId ?? await _assignmentService.getStaffId();
+                      if (staffId == null) return;
+
+                      if (shareMode == SharingMode.none) {
+                        await _assignmentService.unshareNote(
+                          noteType: 'room_note',
+                          noteId: note.id,
+                        );
+                      } else {
+                        await _assignmentService.shareNote(
+                          noteType: 'room_note',
+                          noteId: note.id,
+                          sharedWithStaffIds: selectedStaffIds,
+                          sharedByStaffId: staffId,
+                        );
+                      }
+
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        showTimedSnackBar(
+                          const SnackBar(content: Text('Sharing updated')),
+                        );
+                      }
+                    },
+                    child: Text(localizations.tr('save')),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   // --- FAB ---
 
   Widget _buildFab() {
     return FloatingActionButton.extended(
       onPressed: _showAddSheet,
       icon: const Icon(Icons.add),
-      label: const Text('Add'),
+      label: Text(localizations.tr('add')),
     );
   }
 
@@ -1038,7 +1725,7 @@ class _NotesPageState extends State<NotesPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Add',
+                  localizations.tr('add'),
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -1046,7 +1733,7 @@ class _NotesPageState extends State<NotesPage> {
                 const SizedBox(height: 16),
                 ListTile(
                   leading: const Icon(Icons.notes_outlined),
-                  title: const Text('Add Room Note'),
+                  title: Text(localizations.tr('addNote')),
                   subtitle: const Text('Add a note to a room'),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1058,7 +1745,7 @@ class _NotesPageState extends State<NotesPage> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.checklist_outlined),
-                  title: const Text('Create To-Do List'),
+                  title: Text(localizations.tr('addToDoList')),
                   subtitle: const Text('A checkable list of items'),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1070,7 +1757,7 @@ class _NotesPageState extends State<NotesPage> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.add_task),
-                  title: const Text('Add Single To-Do'),
+                  title: Text(localizations.tr('addToDo')),
                   subtitle: const Text('A simple checkable item'),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1080,6 +1767,22 @@ class _NotesPageState extends State<NotesPage> {
                     _showAddSingleTodoDialog();
                   },
                 ),
+                if (_isManager) ...[
+                  const Divider(),
+                  ListTile(
+                    leading: Icon(Icons.person_pin_outlined,
+                        color: Theme.of(context).colorScheme.primary),
+                    title: Text(localizations.tr('addStaffNote')),
+                    subtitle: Text(localizations.tr('staffNoteSubtitle')),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showAddStaffNoteDialog();
+                    },
+                  ),
+                ],
               ],
             ),
           ),
@@ -1096,7 +1799,7 @@ class _NotesPageState extends State<NotesPage> {
       await _roomService.loadRooms();
       rooms = _roomService.rooms;
     } else {
-      rooms = _assignments.where((a) => a.room != null).map((a) => a.room!).toList();
+      rooms = _assignedRooms;
     }
 
     if (!mounted) return;
@@ -1111,6 +1814,14 @@ class _NotesPageState extends State<NotesPage> {
     String selectedStatus = 'none';
     final titleController = TextEditingController();
     final noteController = TextEditingController();
+    SharingMode shareMode = SharingMode.none;
+    List<String> selectedStaffIds = [];
+
+    final staffService = StaffService();
+    await staffService.loadStaff();
+    final activeStaff = staffService.staff.where((s) => s.isActive).toList();
+
+    if (!mounted) return;
 
     showModalBottomSheet(
       context: context,
@@ -1124,107 +1835,141 @@ class _NotesPageState extends State<NotesPage> {
             return Padding(
               padding: EdgeInsets.fromLTRB(
                 20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Add Note to Room',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedRoomId,
-                    isDense: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Room',
-                      border: OutlineInputBorder(),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      localizations.tr('addNote'),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
-                    items: rooms
-                        .map((r) => DropdownMenuItem(
-                              value: r.id,
-                              child: Text('Room ${r.number}'),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setSheetState(() => selectedRoomId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: titleController,
-                    decoration: const InputDecoration(
-                      labelText: 'Title',
-                      border: OutlineInputBorder(),
-                      hintText: 'e.g. Missing towels',
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedRoomId,
+                      isDense: true,
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('room'),
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: rooms
+                          .map((r) => DropdownMenuItem(
+                                value: r.id,
+                                child: Text('Room ${r.number}'),
+                              ))
+                          .toList(),
+                      onChanged: (v) => setSheetState(() => selectedRoomId = v),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: noteController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: 'Description',
-                      border: OutlineInputBorder(),
-                      hintText: 'e.g. Towels need replacing in bathroom',
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: 'Title',
+                        border: OutlineInputBorder(),
+                        hintText: 'e.g. Missing towels',
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Status', style: Theme.of(context).textTheme.labelLarge),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: noteStatusConfig.entries.map((entry) {
-                      final key = entry.key;
-                      final cfg = entry.value;
-                      final color = cfg['color'] as Color;
-                      final icon = cfg['icon'] as IconData;
-                      final label = cfg['label'] as String;
-                      final isSelected = selectedStatus == key;
-                      return ChoiceChip(
-                        label: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(icon, size: 14, color: isSelected ? Colors.white : color),
-                            const SizedBox(width: 4),
-                            Text(label, style: TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                        selected: isSelected,
-                        selectedColor: color,
-                        backgroundColor: color.withValues(alpha: 0.08),
-                        side: BorderSide(
-                          color: isSelected ? color : color.withValues(alpha: 0.3),
-                        ),
-                        onSelected: (_) => setSheetState(() => selectedStatus = key),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () async {
-                      if (selectedRoomId == null || noteController.text.trim().isEmpty) return;
-                      final staffId = _staffId ?? await _assignmentService.getStaffId();
-                      if (staffId == null) return;
-                      final ok = await _assignmentService.addNote(
-                        roomId: selectedRoomId!,
-                        staffId: staffId,
-                        title: titleController.text.trim(),
-                        content: noteController.text.trim(),
-                        status: selectedStatus,
-                      );
-                      if (ok && ctx.mounted) Navigator.pop(ctx);
-                      if (ok && mounted) {
-                        showTimedSnackBar(
-                          const SnackBar(content: Text('Note added')),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('description'),
+                        border: const OutlineInputBorder(),
+                        hintText: 'e.g. Towels need replacing in bathroom',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(localizations.tr('status'), style: Theme.of(context).textTheme.labelLarge),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: noteStatusConfig.entries.map((entry) {
+                        final key = entry.key;
+                        final cfg = entry.value;
+                        final color = cfg['color'] as Color;
+                        final icon = cfg['icon'] as IconData;
+                        final label = cfg['label'] as String;
+                        final isSelected = selectedStatus == key;
+                        return ChoiceChip(
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(icon, size: 14, color: isSelected ? Colors.white : color),
+                              const SizedBox(width: 4),
+                              Text(label, style: const TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                          selected: isSelected,
+                          selectedColor: color,
+                          backgroundColor: color.withValues(alpha: 0.08),
+                          side: BorderSide(
+                            color: isSelected ? color : color.withValues(alpha: 0.3),
+                          ),
+                          onSelected: (_) => setSheetState(() => selectedStatus = key),
                         );
-                        _loadData();
-                      }
-                    },
-                    child: const Text('Save Note'),
-                  ),
-                ],
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    SharingSection(
+                      initialMode: shareMode,
+                      initialStaffIds: selectedStaffIds,
+                      availableStaff: activeStaff,
+                      onModeChanged: (mode) => setSheetState(() => shareMode = mode),
+                      onStaffIdsChanged: (ids) => setSheetState(() => selectedStaffIds = ids),
+                    ),
+                    const SizedBox(height: 16),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _saving,
+                      builder: (ctx, saving, child) {
+                        return FilledButton(
+                          onPressed: saving ? null : () async {
+                            if (selectedRoomId == null) return;
+                            _saving.value = true;
+                            try {
+                              final staffId = _staffId ?? await _assignmentService.getStaffId();
+                              if (staffId == null) return;
+                              final ok = await _assignmentService.addNote(
+                                roomId: selectedRoomId!,
+                                staffId: staffId,
+                                title: titleController.text.trim(),
+                                content: noteController.text.trim(),
+                                status: selectedStatus,
+                              );
+                              if (ok && selectedStaffIds.isNotEmpty) {
+                                final noteData = await _assignmentService.loadNotes(selectedRoomId!);
+                                if (noteData.isNotEmpty) {
+                                  await _assignmentService.shareNote(
+                                    noteType: 'room_note',
+                                    noteId: noteData.first.id,
+                                    sharedWithStaffIds: selectedStaffIds,
+                                    sharedByStaffId: staffId,
+                                  );
+                                }
+                              }
+                              if (ok && ctx.mounted) Navigator.pop(ctx);
+                              if (ok && mounted) {
+                                showTimedSnackBar(
+                                  const SnackBar(content: Text('Note added')),
+                                );
+                                _loadData();
+                              }
+                            } finally {
+                              _saving.value = false;
+                            }
+                          },
+                          child: saving
+                              ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                              : Text(localizations.tr('save')),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -1237,6 +1982,8 @@ class _NotesPageState extends State<NotesPage> {
 
   void _showCreateListDialog() {
     final controller = TextEditingController();
+    SharingMode shareMode = SharingMode.none;
+    List<String> selectedStaffIds = [];
 
     showModalBottomSheet(
       context: context,
@@ -1245,54 +1992,77 @@ class _NotesPageState extends State<NotesPage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'New To-Do List',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      localizations.tr('newList'),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'List Title',
-                  border: OutlineInputBorder(),
-                  hintText: 'e.g. Floor 2 supplies',
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('listName'),
+                        border: const OutlineInputBorder(),
+                        hintText: 'e.g. Floor 2 supplies',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSharingSectionForDialog(
+                      shareMode: shareMode,
+                      selectedStaffIds: selectedStaffIds,
+                      onModeChanged: (mode) => setSheetState(() => shareMode = mode),
+                      onStaffIdsChanged: (ids) => setSheetState(() => selectedStaffIds = ids),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () async {
+                        if (controller.text.trim().isEmpty || _staffId == null) return;
+                        final item = await _assignmentService.addTodo(
+                          staffId: _staffId!,
+                          title: controller.text.trim(),
+                          isList: true,
+                        );
+                        if (item != null) {
+                          if (shareMode != SharingMode.none && selectedStaffIds.isNotEmpty) {
+                            await _assignmentService.shareNote(
+                              noteType: 'todo',
+                              noteId: item.id,
+                              sharedWithStaffIds: selectedStaffIds,
+                              sharedByStaffId: _staffId!,
+                            );
+                          }
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) {
+                            setState(() {
+                              _todos.insert(0, item);
+                              _listItems[item.id] = [];
+                              _expandedLists[item.id] = true;
+                            });
+                            showTimedSnackBar(
+                              const SnackBar(content: Text('To-Do list created')),
+                            );
+                          }
+                        }
+                      },
+                      child: const Text('Create List'),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () async {
-                  if (controller.text.trim().isEmpty || _staffId == null) return;
-                  final item = await _assignmentService.addTodo(
-                    staffId: _staffId!,
-                    title: controller.text.trim(),
-                    isList: true,
-                  );
-                  if (item != null && ctx.mounted) Navigator.pop(ctx);
-                  if (item != null && mounted) {
-                    setState(() {
-                      _todos.insert(0, item);
-                      _listItems[item.id] = [];
-                      _expandedLists[item.id] = true;
-                    });
-                    showTimedSnackBar(
-                      const SnackBar(content: Text('To-Do list created')),
-                    );
-                  }
-                },
-                child: const Text('Create List'),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -1302,6 +2072,8 @@ class _NotesPageState extends State<NotesPage> {
 
   void _showAddSingleTodoDialog() {
     final controller = TextEditingController();
+    SharingMode shareMode = SharingMode.none;
+    List<String> selectedStaffIds = [];
 
     showModalBottomSheet(
       context: context,
@@ -1310,49 +2082,72 @@ class _NotesPageState extends State<NotesPage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'New To-Do',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'New To-Do',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Task',
-                  border: OutlineInputBorder(),
-                  hintText: 'e.g. Check stock levels',
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Task',
+                        border: OutlineInputBorder(),
+                        hintText: 'e.g. Check stock levels',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSharingSectionForDialog(
+                      shareMode: shareMode,
+                      selectedStaffIds: selectedStaffIds,
+                      onModeChanged: (mode) => setSheetState(() => shareMode = mode),
+                      onStaffIdsChanged: (ids) => setSheetState(() => selectedStaffIds = ids),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () async {
+                        if (controller.text.trim().isEmpty || _staffId == null) return;
+                        final item = await _assignmentService.addTodo(
+                          staffId: _staffId!,
+                          title: controller.text.trim(),
+                        );
+                        if (item != null) {
+                          if (shareMode != SharingMode.none && selectedStaffIds.isNotEmpty) {
+                            await _assignmentService.shareNote(
+                              noteType: 'todo',
+                              noteId: item.id,
+                              sharedWithStaffIds: selectedStaffIds,
+                              sharedByStaffId: _staffId!,
+                            );
+                          }
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) {
+                            setState(() => _todos.insert(0, item));
+                            showTimedSnackBar(
+                              const SnackBar(content: Text('To-Do added')),
+                            );
+                          }
+                        }
+                      },
+                      child: const Text('Add'),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () async {
-                  if (controller.text.trim().isEmpty || _staffId == null) return;
-                  final item = await _assignmentService.addTodo(
-                    staffId: _staffId!,
-                    title: controller.text.trim(),
-                  );
-                  if (item != null && ctx.mounted) Navigator.pop(ctx);
-                  if (item != null && mounted) {
-                    setState(() => _todos.insert(0, item));
-                    showTimedSnackBar(
-                      const SnackBar(content: Text('To-Do added')),
-                    );
-                  }
-                },
-                child: const Text('Add'),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -1429,7 +2224,7 @@ class _NotesPageState extends State<NotesPage> {
                     );
                   }
                 },
-                child: const Text('Save'),
+                child: Text(localizations.tr('save')),
               ),
             ],
           ),
@@ -1490,7 +2285,7 @@ class _NotesPageState extends State<NotesPage> {
                     }
                   }
                 },
-                child: const Text('Save'),
+                child: Text(localizations.tr('save')),
               ),
             ],
           ),
@@ -1551,7 +2346,7 @@ class _NotesPageState extends State<NotesPage> {
                     }
                   }
                 },
-                child: const Text('Save'),
+                child: Text(localizations.tr('save')),
               ),
             ],
           ),
@@ -1611,13 +2406,221 @@ class _NotesPageState extends State<NotesPage> {
                     );
                   }
                 },
-                child: const Text('Save'),
+                child: Text(localizations.tr('save')),
               ),
             ],
           ),
         );
       },
     );
+  }
+
+  // --- Staff Notes ---
+
+  void _showAddStaffNoteDialog() async {
+    final staffService = StaffService();
+    await staffService.loadStaff();
+    final activeStaff = staffService.staff.where((s) => s.isActive).toList();
+
+    if (!mounted) return;
+
+    final titleController = TextEditingController();
+    final contentController = TextEditingController();
+    List<String> selectedStaffIds = [];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                  20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      localizations.tr('addStaffNote'),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: titleController,
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('noteTitle'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: contentController,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        labelText: localizations.tr('noteContent'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    Text(localizations.tr('sendTo'),
+                        style: Theme.of(context).textTheme.labelLarge),
+                    const SizedBox(height: 8),
+                    ...activeStaff.map((s) => CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          value: selectedStaffIds.contains(s.id),
+                          title: Text(s.name),
+                          subtitle: Text(s.role.label,
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[500])),
+                          onChanged: (v) {
+                            setSheetState(() {
+                              if (v == true) {
+                                selectedStaffIds.add(s.id);
+                              } else {
+                                selectedStaffIds.remove(s.id);
+                              }
+                            });
+                          },
+                        )),
+                    const SizedBox(height: 16),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _saving,
+                      builder: (ctx, saving, child) {
+                        return FilledButton(
+                          onPressed: saving
+                              ? null
+                              : () async {
+                                  if (titleController.text.trim().isEmpty) return;
+                                  if (selectedStaffIds.isEmpty) return;
+                                  _saving.value = true;
+                                  try {
+                                    final staffId = _staffId ??
+                                        await _assignmentService.getStaffId();
+                                    if (staffId == null) return;
+                                    final note =
+                                        await _assignmentService.createStaffNote(
+                                      title: titleController.text.trim(),
+                                      content: contentController.text.trim(),
+                                      createdByStaffId: staffId,
+                                      sharedWithStaffIds: selectedStaffIds,
+                                    );
+                                    if (note != null && ctx.mounted) {
+                                      Navigator.pop(ctx);
+                                      showTimedSnackBar(SnackBar(
+                                        content: Text(localizations
+                                            .tr('staffNoteSent')),
+                                      ));
+                                      _loadData();
+                                    }
+                                  } finally {
+                                    _saving.value = false;
+                                  }
+                                },
+                          child: saving
+                              ? const SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : Text(localizations.tr('send')),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showStaffNoteDetail(StaffNote note) {
+    final isMine = note.createdBy == _staffId;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(note.title,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        )),
+                const SizedBox(height: 8),
+                Text(
+                  isMine
+                      ? '${localizations.tr('sentTo')}: ${note.sharedWithNames.join(', ')}'
+                      : '${localizations.tr('from')}: ${note.createdByName ?? '-'}',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                Text(_formatTime(note.createdAt),
+                    style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                const SizedBox(height: 16),
+                Text(note.content.isEmpty
+                    ? '-'
+                    : note.content),
+                const SizedBox(height: 20),
+                FilledButton.tonal(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(localizations.tr('close')),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _confirmDeleteStaffNote(StaffNote note) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(localizations.tr('delete')),
+        content: Text(localizations.tr('deleteStaffNoteConfirm')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(localizations.tr('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(localizations.tr('delete')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _assignmentService.deleteStaffNote(note.id);
+    if (mounted) {
+      showTimedSnackBar(
+          SnackBar(content: Text(localizations.tr('staffNoteDeleted'))));
+      _loadData();
+    }
   }
 
   String _formatTime(DateTime dateTime) {

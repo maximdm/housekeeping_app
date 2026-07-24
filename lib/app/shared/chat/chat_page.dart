@@ -72,7 +72,7 @@ class _ChatPageState extends State<ChatPage> {
       }
 
       _currentStaffId = staffData['id'] as String;
-      _isAdmin = staffData['role'] == 'receptionist';
+      _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager';
       _chatService.setCurrentStaffId(_currentStaffId!);
 
       await _chatService.loadMessages();
@@ -190,7 +190,7 @@ class _ChatPageState extends State<ChatPage> {
             ListTile(
               leading: Icon(Icons.delete_outline,
                   color: Theme.of(context).colorScheme.error),
-              title: Text('Delete message',
+              title: Text(localizations.tr('deleteMessage'),
                   style: TextStyle(color: Theme.of(context).colorScheme.error)),
               onTap: () {
                 Navigator.pop(ctx);
@@ -209,9 +209,9 @@ class _ChatPageState extends State<ChatPage> {
     Timer? undoTimer;
     showTimedSnackBar(
       SnackBar(
-        content: const Text('Message deleted'),
+        content: Text(localizations.tr('deleteMessageConfirm')),
         action: SnackBarAction(
-          label: 'Undo',
+          label: localizations.tr('undo'),
           onPressed: () {
             undoTimer?.cancel();
             _chatService.restoreMessage(deleted);
@@ -233,9 +233,9 @@ class _ChatPageState extends State<ChatPage> {
     Timer? undoTimer;
     showTimedSnackBar(
       SnackBar(
-        content: const Text('Chat cleared'),
+        content: Text(localizations.tr('clearChatConfirm')),
         action: SnackBarAction(
-          label: 'Undo',
+          label: localizations.tr('undo'),
           onPressed: () {
             undoTimer?.cancel();
             _chatService.restoreAllMessages(savedMessages);
@@ -306,17 +306,22 @@ class _ChatPageState extends State<ChatPage> {
     if (_isAdmin == null || _isAdmin!) {
       return AdminLayout(
         currentRoute: '/shared/chat',
-        title: _viewingHistory ? 'Chat History' : 'Team Chat',
+        title: _viewingHistory ? localizations.tr('chatHistory') : localizations.tr('chatTitle'),
         appBarActions: _viewingHistory ? null : [
-          TextButton.icon(
-            icon: const Icon(Icons.history, size: 20),
-            label: const Text('History', style: TextStyle(fontSize: 13)),
-            onPressed: _openHistory,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: _chatService.messages.isEmpty ? null : _clearChat,
-            tooltip: 'Clear chat',
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == 'history') _openHistory();
+              if (value == 'clear') _clearChat();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'history', child: Text(localizations.tr('chatHistory'))),
+              PopupMenuItem(
+                value: 'clear',
+                enabled: _chatService.messages.isNotEmpty,
+                child: Text(localizations.tr('clearChat')),
+              ),
+            ],
           ),
         ],
         scaffoldKey: _scaffoldKey,
@@ -325,18 +330,23 @@ class _ChatPageState extends State<ChatPage> {
       );
     }
     return StaffLayout(
-      currentTabIndex: 2,
-      title: _viewingHistory ? 'Chat History' : 'Team Chat',
+      currentTabIndex: 3,
+      title: _viewingHistory ? localizations.tr('chatHistory') : localizations.tr('chatTitle'),
       appBarActions: _viewingHistory ? null : [
-        TextButton.icon(
-          icon: const Icon(Icons.history, size: 20),
-          label: const Text('History', style: TextStyle(fontSize: 13)),
-          onPressed: _openHistory,
-        ),
-        IconButton(
-          icon: const Icon(Icons.delete_outline),
-          onPressed: _chatService.messages.isEmpty ? null : _clearChat,
-          tooltip: 'Clear chat',
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert),
+          onSelected: (value) {
+            if (value == 'history') _openHistory();
+            if (value == 'clear') _clearChat();
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(value: 'history', child: Text(localizations.tr('chatHistory'))),
+            PopupMenuItem(
+              value: 'clear',
+              enabled: _chatService.messages.isNotEmpty,
+              child: Text(localizations.tr('clearChat')),
+            ),
+          ],
         ),
       ],
       scaffoldKey: _scaffoldKey,
@@ -357,7 +367,7 @@ class _ChatPageState extends State<ChatPage> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Text(
-                'Chat History',
+                localizations.tr('chatHistory'),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -373,7 +383,7 @@ class _ChatPageState extends State<ChatPage> {
                       children: [
                         Icon(Icons.history, size: 48, color: Colors.grey[400]),
                         const SizedBox(height: 12),
-                        Text('No messages yet', style: TextStyle(color: Colors.grey[600])),
+                        Text(localizations.tr('noMessages'), style: TextStyle(color: Colors.grey[600])),
                       ],
                     ),
                   )
@@ -395,9 +405,9 @@ class _ChatPageState extends State<ChatPage> {
     final now = DateTime.now();
     String label;
     if (_isSameDay(group.date, now)) {
-      label = 'Today';
+      label = localizations.tr('today');
     } else if (_isSameDay(group.date, now.subtract(const Duration(days: 1)))) {
-      label = 'Yesterday';
+      label = localizations.tr('yesterday');
     } else {
       label = _formatDate(group.date);
     }
@@ -507,9 +517,9 @@ class _ChatPageState extends State<ChatPage> {
     final now = DateTime.now();
     String label;
     if (_isSameDay(date, now)) {
-      label = 'Today';
+      label = localizations.tr('today');
     } else if (_isSameDay(date, now.subtract(const Duration(days: 1)))) {
-      label = 'Yesterday';
+      label = localizations.tr('yesterday');
     } else {
       label = _formatDate(date);
     }
@@ -548,7 +558,7 @@ class _ChatPageState extends State<ChatPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: message.senderRole == StaffRole.receptionist
+              color: (message.senderRole == StaffRole.receptionist || message.senderRole == StaffRole.manager)
                   ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
                   : Colors.blue.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(4),
@@ -558,7 +568,7 @@ class _ChatPageState extends State<ChatPage> {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color: message.senderRole == StaffRole.receptionist
+                color: (message.senderRole == StaffRole.receptionist || message.senderRole == StaffRole.manager)
                     ? Theme.of(context).colorScheme.primary
                     : Colors.blue,
               ),
@@ -626,7 +636,7 @@ class _ChatPageState extends State<ChatPage> {
               child: TextField(
                 controller: _messageController,
                 decoration: InputDecoration(
-                  hintText: 'Type a message...',
+                  hintText: localizations.tr('typeMessage'),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                   ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../main.dart';
 import '../../../models/chat_message.dart';
 import '../../../models/staff_member.dart';
 import '../../../services/chat_service.dart';
@@ -110,7 +111,7 @@ class _AdminChatPageState extends State<AdminChatPage> {
     return AdminLayout(
       currentRoute: '/admin/chat/admin_chat',
       child: Scaffold(
-        appBar: AppBar(title: const Text('Team Chat')),
+        appBar: AppBar(title: Text(localizations.tr('teamChat'))),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : Column(
@@ -133,10 +134,10 @@ class _AdminChatPageState extends State<AdminChatPage> {
                 size: 64,
                 color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4)),
             const SizedBox(height: 16),
-            Text('No messages yet',
+            Text(localizations.tr('noMessages'),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey[600])),
             const SizedBox(height: 8),
-            Text('Start a conversation with your team',
+            Text(localizations.tr('startConversation'),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey[500])),
           ],
         ),
@@ -184,9 +185,9 @@ class _AdminChatPageState extends State<AdminChatPage> {
     final now = DateTime.now();
     String label;
     if (_isSameDay(date, now)) {
-      label = 'Today';
+      label = localizations.tr('today');
     } else if (_isSameDay(date, now.subtract(const Duration(days: 1)))) {
-      label = 'Yesterday';
+      label = localizations.tr('yesterday');
     } else {
       label = '${date.day}/${date.month}/${date.year}';
     }
@@ -216,7 +217,7 @@ class _AdminChatPageState extends State<AdminChatPage> {
         children: [
           Flexible(
             child: Text(
-              message.senderName.isNotEmpty ? message.senderName : 'Unknown',
+              message.senderName.isNotEmpty ? message.senderName : localizations.tr('unknown'),
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
               overflow: TextOverflow.ellipsis,
             ),
@@ -225,7 +226,7 @@ class _AdminChatPageState extends State<AdminChatPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: message.senderRole == StaffRole.receptionist
+              color: (message.senderRole == StaffRole.receptionist || message.senderRole == StaffRole.manager)
                   ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
                   : Colors.blue.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(4),
@@ -235,7 +236,7 @@ class _AdminChatPageState extends State<AdminChatPage> {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color: message.senderRole == StaffRole.receptionist
+                color: (message.senderRole == StaffRole.receptionist || message.senderRole == StaffRole.manager)
                     ? Theme.of(context).colorScheme.primary
                     : Colors.blue,
               ),
@@ -300,7 +301,7 @@ class _AdminChatPageState extends State<AdminChatPage> {
               child: TextField(
                 controller: _messageController,
                 decoration: InputDecoration(
-                  hintText: 'Type a message...',
+                  hintText: localizations.tr('typeMessage'),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                   ),

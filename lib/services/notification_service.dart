@@ -10,6 +10,7 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
+  bool _permissionsGranted = false;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -32,9 +33,7 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
-    await _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>()?.requestNotificationsPermission();
-
+    _permissionsGranted = await _requestPermissions();
     _initialized = true;
   }
 
@@ -42,25 +41,28 @@ class NotificationService {
     debugPrint('Notification tapped: ${response.payload}');
   }
 
-  Future<bool> _requestPermissionsIfNeeded() async {
-    if (!_initialized) await init();
+  Future<bool> _requestPermissions() async {
+    try {
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      if (android != null) {
+        final granted = await android.requestNotificationsPermission();
+        if (granted != true) return false;
+      }
 
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    if (android != null) {
-      final granted = await android.requestNotificationsPermission();
-      if (granted != true) return false;
-    }
-
-    final ios = _plugin.resolvePlatformSpecificImplementation<
-        IOSFlutterLocalNotificationsPlugin>();
-    if (ios != null) {
-      final granted = await ios.requestPermissions(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-      if (granted != true) return false;
+      final ios = _plugin.resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin>();
+      if (ios != null) {
+        final granted = await ios.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+        if (granted != true) return false;
+      }
+    } catch (e) {
+      debugPrint('Notification permission request failed: $e');
+      return false;
     }
 
     return true;
@@ -73,12 +75,7 @@ class NotificationService {
     String? payload,
   }) async {
     if (!_initialized) await init();
-
-    final hasPermission = await _requestPermissionsIfNeeded();
-    if (!hasPermission) {
-      debugPrint('Notification permission denied, skipping notification');
-      return;
-    }
+    if (!_permissionsGranted) return;
 
     const androidDetails = AndroidNotificationDetails(
       'housekeeping_channel',
@@ -110,7 +107,7 @@ class NotificationService {
     required String staffName,
   }) async {
     await showNotification(
-      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      id: DateTime.now().millisecondsSinceEpoch % 2147483647,
       title: 'Room Assigned',
       body: '$staffName has been assigned to room $roomNumber',
     );
@@ -121,7 +118,7 @@ class NotificationService {
     required String newStatus,
   }) async {
     await showNotification(
-      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      id: DateTime.now().millisecondsSinceEpoch % 2147483647,
       title: 'Room Status Updated',
       body: 'Room $roomNumber is now $newStatus',
     );
@@ -132,9 +129,20 @@ class NotificationService {
     required String authorName,
   }) async {
     await showNotification(
-      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      id: DateTime.now().millisecondsSinceEpoch % 2147483647,
       title: 'New Note',
       body: '$authorName added a note to room $roomNumber',
+    );
+  }
+
+  Future<void> notifyError({
+    required String title,
+    required String message,
+  }) async {
+    await showNotification(
+      id: DateTime.now().millisecondsSinceEpoch % 2147483647,
+      title: title,
+      body: message,
     );
   }
 }

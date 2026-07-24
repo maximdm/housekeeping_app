@@ -32,7 +32,8 @@ enum StaffStatus {
 
 enum StaffRole {
   cleaner,
-  receptionist;
+  receptionist,
+  manager;
 
   String get label {
     switch (this) {
@@ -40,6 +41,8 @@ enum StaffRole {
         return 'Cleaner';
       case StaffRole.receptionist:
         return 'Receptionist';
+      case StaffRole.manager:
+        return 'Manager';
     }
   }
 

@@ -13,6 +13,7 @@ class AdminLayout extends StatelessWidget {
   final Widget? floatingActionButton;
   final Widget? endDrawer;
   final GlobalKey<ScaffoldState>? scaffoldKey;
+  final bool isFullAdmin;
 
   const AdminLayout({
     super.key,
@@ -23,20 +24,23 @@ class AdminLayout extends StatelessWidget {
     this.floatingActionButton,
     this.endDrawer,
     this.scaffoldKey,
+    this.isFullAdmin = true,
   });
 
-  static const _navItems = [
-    _NavItem('Overview', Icons.dashboard_outlined, Icons.dashboard, '/admin/overview'),
-    _NavItem('Rooms', Icons.meeting_room_outlined, Icons.meeting_room, '/admin/rooms'),
-    _NavItem('Staff', Icons.people_outline, Icons.people, '/admin/staff'),
-    _NavItem('Chat', Icons.chat_outlined, Icons.chat, '/shared/chat'),
-    _NavItem('Notes', Icons.notes_outlined, Icons.notes, '/shared/notes'),
-    _NavItem('AI Chat', Icons.smart_toy_outlined, Icons.smart_toy, '/shared/chat/ai_chat'),
+  static final _navItems = [
+    _NavItem('overview', Icons.dashboard_outlined, Icons.dashboard, '/admin/overview'),
+    _NavItem('rooms', Icons.meeting_room_outlined, Icons.meeting_room, '/admin/rooms'),
+    _NavItem('staff', Icons.people_outline, Icons.people, '/admin/staff'),
+    _NavItem('chat', Icons.chat_outlined, Icons.chat, '/shared/chat'),
+    _NavItem('notes', Icons.notes_outlined, Icons.notes, '/shared/notes'),
+    _NavItem('aiChat', Icons.smart_toy_outlined, Icons.smart_toy, '/shared/chat/ai_chat'),
   ];
 
+  List<_NavItem> get _visibleNavItems => _navItems;
+
   int get _selectedIndex {
-    for (int i = 0; i < _navItems.length; i++) {
-      if (currentRoute == _navItems[i].route) return i;
+    for (int i = 0; i < _visibleNavItems.length; i++) {
+      if (currentRoute == _visibleNavItems[i].route) return i;
     }
     return 0;
   }
@@ -79,7 +83,7 @@ class AdminLayout extends StatelessWidget {
     return Scaffold(
       key: scaffoldKey,
       appBar: AppBar(
-        title: Text(title ?? 'Housekeeping'),
+        title: Text(title ?? localizations.tr('housekeeping')),
         automaticallyImplyLeading: false,
         actions: [
           ...?appBarActions,
@@ -89,19 +93,19 @@ class AdminLayout extends StatelessWidget {
                   ? Icons.light_mode_outlined
                   : Icons.dark_mode_outlined,
             ),
-            tooltip: 'Toggle Theme',
+            tooltip: localizations.tr('toggleTheme'),
             onPressed: () => themeService.toggle(),
           ),
           IconButton(
             icon: const Icon(Icons.lock_outline),
-            tooltip: 'Change Password',
+            tooltip: localizations.tr('changePassword'),
             onPressed: () {
               Routefly.navigate('/staff/settings/change_password');
             },
           ),
           IconButton(
             icon: const Icon(Icons.logout),
-            tooltip: 'Sign Out',
+            tooltip: localizations.tr('signOut'),
             onPressed: () async {
               await Supabase.instance.client.auth.signOut();
               if (context.mounted) {
@@ -112,27 +116,20 @@ class AdminLayout extends StatelessWidget {
         ],
       ),
       body: BackgroundTexture(child: child),
-      floatingActionButton: floatingActionButton ?? FloatingActionButton(
-        heroTag: 'admin_chat_fab',
-        onPressed: () {
-          Routefly.navigate('/shared/chat');
-        },
-        tooltip: 'Team Chat',
-        child: const Icon(Icons.chat_bubble_outline),
-      ),
+      floatingActionButton: floatingActionButton,
       endDrawer: endDrawer,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           if (index != _selectedIndex) {
-            Routefly.navigate(_navItems[index].route);
+            Routefly.navigate(_visibleNavItems[index].route);
           }
         },
-        destinations: _navItems
+        destinations: _visibleNavItems
             .map((item) => NavigationDestination(
                   icon: Icon(item.icon),
                   selectedIcon: Icon(item.activeIcon),
-                  label: item.label,
+                  label: localizations.tr(item.labelKey),
                 ))
             .toList(),
       ),
@@ -157,15 +154,16 @@ class AdminLayout extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
-                Icon(
-                  Icons.cleaning_services_outlined,
-                  color: Theme.of(context).colorScheme.primary,
+                Image.asset(
+                  'assets/icons/icon_hk_app.png',
+                  width: 28,
+                  height: 28,
                 ),
                 if (extended) ...[
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Housekeeping',
+                      localizations.tr('housekeeping'),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
                           ),
@@ -178,7 +176,7 @@ class AdminLayout extends StatelessWidget {
           ),
           const Divider(height: 1),
           const SizedBox(height: 8),
-          ..._navItems.map((item) => _buildNavItem(context, item, extended)),
+          ..._visibleNavItems.map((item) => _buildNavItem(context, item, extended)),
           const Spacer(),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -204,7 +202,7 @@ class AdminLayout extends StatelessWidget {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            themeService.isDark ? 'Light Mode' : 'Dark Mode',
+                            themeService.isDark ? localizations.tr('lightMode') : localizations.tr('darkMode'),
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 14,
@@ -240,7 +238,7 @@ class AdminLayout extends StatelessWidget {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'Change Password',
+                            localizations.tr('changePassword'),
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 14,
@@ -313,7 +311,7 @@ class AdminLayout extends StatelessWidget {
                           fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                           fontSize: 14,
                         ),
-                        child: Text(item.label),
+                        child: Text(localizations.tr(item.labelKey)),
                       ),
                     ),
                   ],
@@ -354,7 +352,7 @@ class AdminLayout extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Sign Out',
+                      localizations.tr('signOut'),
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.error,
                         fontSize: 14,
@@ -372,10 +370,10 @@ class AdminLayout extends StatelessWidget {
 }
 
 class _NavItem {
-  final String label;
+  final String labelKey;
   final IconData icon;
   final IconData activeIcon;
   final String route;
 
-  const _NavItem(this.label, this.icon, this.activeIcon, this.route);
+  const _NavItem(this.labelKey, this.icon, this.activeIcon, this.route);
 }

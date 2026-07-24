@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/floor.dart';
@@ -166,7 +167,8 @@ class RoomService extends ChangeNotifier {
 
   Future<bool> deleteRoom(String id) async {
     try {
-      final room = _rooms.firstWhere((r) => r.id == id);
+      final index = _rooms.indexWhere((r) => r.id == id);
+      final room = index != -1 ? _rooms[index] : null;
 
       await _client.from('rooms').delete().eq('id', id);
       _rooms.removeWhere((r) => r.id == id);
@@ -175,7 +177,7 @@ class RoomService extends ChangeNotifier {
 
       await ActivityService().log(
         action: 'room_deleted',
-        details: {'room_id': id, 'room_number': room.number},
+        details: {'room_id': id, 'room_number': room?.number ?? id},
       );
 
       return true;
@@ -256,7 +258,8 @@ class RoomService extends ChangeNotifier {
 
   Future<bool> deleteRoomType(String id) async {
     try {
-      final roomType = _roomTypes.firstWhere((rt) => rt.id == id);
+      final index = _roomTypes.indexWhere((rt) => rt.id == id);
+      final roomType = index != -1 ? _roomTypes[index] : null;
 
       await _client.from('room_types').delete().eq('id', id);
       _roomTypes.removeWhere((rt) => rt.id == id);
@@ -265,7 +268,7 @@ class RoomService extends ChangeNotifier {
 
       await ActivityService().log(
         action: 'room_type_deleted',
-        details: {'room_type_id': id, 'name': roomType.name},
+        details: {'room_type_id': id, 'name': roomType?.name ?? id},
       );
 
       return true;
@@ -327,7 +330,8 @@ class RoomService extends ChangeNotifier {
 
   Future<bool> deleteFloor(String id) async {
     try {
-      final floor = _floors.firstWhere((f) => f.id == id);
+      final index = _floors.indexWhere((f) => f.id == id);
+      final floor = index != -1 ? _floors[index] : null;
 
       await _client.from('floors').delete().eq('id', id);
       _floors.removeWhere((f) => f.id == id);
@@ -336,7 +340,7 @@ class RoomService extends ChangeNotifier {
 
       await ActivityService().log(
         action: 'floor_deleted',
-        details: {'floor_id': id, 'number': floor.number},
+        details: {'floor_id': id, 'number': floor?.number ?? id},
       );
 
       return true;
@@ -349,12 +353,14 @@ class RoomService extends ChangeNotifier {
   // --- Filtering ---
 
   List<Room> filterRooms({String? floorId, RoomStatus? status, String? roomTypeId}) {
-    return _rooms.where((room) {
+    final filtered = _rooms.where((room) {
       if (floorId != null && room.floorId != floorId) return false;
       if (status != null && room.status != status) return false;
       if (roomTypeId != null && room.roomTypeId != roomTypeId) return false;
       return true;
     }).toList();
+    filtered.sort(Room.compare);
+    return filtered;
   }
 
   // --- Offline Cache Methods ---
@@ -375,7 +381,7 @@ class RoomService extends ChangeNotifier {
           'room_type_name': room.roomTypeName,
           'floor_name': room.floorName,
           'floor_number': room.floorNumber,
-        });
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     } catch (e) {
       debugPrint('Error caching rooms: $e');

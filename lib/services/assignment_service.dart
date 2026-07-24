@@ -1,9 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/room.dart';
+import '../models/shared_note.dart';
+import '../models/staff_note.dart';
 import '../models/todo_item.dart';
 import '../models/todo_list_item.dart';
 import 'notification_service.dart';
@@ -47,54 +47,92 @@ class RoomNote {
           : null,
       forwardedTo: json['forwarded_to'] as String?,
       forwardedToName: json['forwarded_to_staff'] != null
-          ? (json['forwarded_to_staff'] as Map<String, dynamic>)['name'] as String?
+          ? (json['forwarded_to_staff'] as Map<String, dynamic>)['name']
+              as String?
           : null,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
     );
   }
 }
 
 final Map<String, Map<String, dynamic>> noteStatusConfig = {
-  'none': {'label': 'None', 'icon': Icons.circle_outlined, 'color': Colors.grey},
-  'important': {'label': 'Important', 'icon': Icons.star_rounded, 'color': const Color(0xFFE53935)},
-  'done': {'label': 'Done', 'icon': Icons.check_circle_rounded, 'color': const Color(0xFF43A047)},
-  'problem': {'label': 'Problem', 'icon': Icons.warning_rounded, 'color': const Color(0xFFFF8F00)},
-  'delegate': {'label': 'Delegate', 'icon': Icons.person_add_rounded, 'color': const Color(0xFF5C6BC0)},
-  'today': {'label': 'Today', 'icon': Icons.today_rounded, 'color': const Color(0xFF00897B)},
-  'tomorrow': {'label': 'Tomorrow', 'icon': Icons.fast_forward_rounded, 'color': const Color(0xFF0277BD)},
-  'this_week': {'label': 'This Week', 'icon': Icons.date_range_rounded, 'color': const Color(0xFF7B1FA2)},
+  'none': {
+    'label': 'None',
+    'icon': Icons.circle_outlined,
+    'color': Colors.grey,
+  },
+  'important': {
+    'label': 'Important',
+    'icon': Icons.star_rounded,
+    'color': const Color(0xFFE53935),
+  },
+  'done': {
+    'label': 'Done',
+    'icon': Icons.check_circle_rounded,
+    'color': const Color(0xFF43A047),
+  },
+  'problem': {
+    'label': 'Problem',
+    'icon': Icons.warning_rounded,
+    'color': const Color(0xFFFF8F00),
+  },
+  'delegate': {
+    'label': 'Delegate',
+    'icon': Icons.person_add_rounded,
+    'color': const Color(0xFF5C6BC0),
+  },
+  'today': {
+    'label': 'Today',
+    'icon': Icons.today_rounded,
+    'color': const Color(0xFF00897B),
+  },
+  'tomorrow': {
+    'label': 'Tomorrow',
+    'icon': Icons.fast_forward_rounded,
+    'color': const Color(0xFF0277BD),
+  },
+  'this_week': {
+    'label': 'This Week',
+    'icon': Icons.date_range_rounded,
+    'color': const Color(0xFF7B1FA2),
+  },
 };
 
-class Assignment {
+class FloorAssignment {
   final String id;
-  final String roomId;
   final String staffId;
-  final DateTime assignedAt;
-  final DateTime? completedAt;
+  final String floorId;
+  final DateTime assignmentDate;
+  final String? staffName;
+  final String? floorName;
+  final String? floorNumber;
 
-  final Room? room;
-
-  Assignment({
+  FloorAssignment({
     required this.id,
-    required this.roomId,
     required this.staffId,
-    required this.assignedAt,
-    this.completedAt,
-    this.room,
+    required this.floorId,
+    required this.assignmentDate,
+    this.staffName,
+    this.floorName,
+    this.floorNumber,
   });
 
-  bool get isCompleted => completedAt != null;
-
-  factory Assignment.fromJson(Map<String, dynamic> json) {
-    return Assignment(
+  factory FloorAssignment.fromJson(Map<String, dynamic> json) {
+    return FloorAssignment(
       id: json['id'] as String,
-      roomId: json['room_id'] as String,
       staffId: json['staff_id'] as String,
-      assignedAt: DateTime.parse(json['assigned_at'] as String),
-      completedAt: json['completed_at'] != null
-          ? DateTime.parse(json['completed_at'] as String)
+      floorId: json['floor_id'] as String,
+      assignmentDate:
+          DateTime.parse(json['assignment_date'] as String).toLocal(),
+      staffName: json['staff'] != null
+          ? (json['staff'] as Map<String, dynamic>)['name'] as String?
           : null,
-      room: json['room'] != null ? Room.fromJson(json['room']) : null,
+      floorName: json['floor'] != null
+          ? (json['floor'] as Map<String, dynamic>)['name'] as String?
+          : null,
+      floorNumber: json['floor'] != null
+          ? (json['floor'] as Map<String, dynamic>)['number']?.toString()
+          : null,
     );
   }
 }
@@ -122,7 +160,7 @@ class ActivityLogEntry {
       staffId: json['staff_id'] as String?,
       action: json['action'] as String,
       details: json['details'] as Map<String, dynamic>?,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
       staffName: json['staff'] != null
           ? (json['staff'] as Map<String, dynamic>)['name'] as String?
           : null,
@@ -130,11 +168,12 @@ class ActivityLogEntry {
   }
 }
 
+class StaffSelectedRoom {
+  static Room? instance;
+}
+
 class AssignmentService extends ChangeNotifier {
   final SupabaseClient _client = Supabase.instance.client;
-
-  List<Assignment> _assignments = [];
-  List<Assignment> get assignments => _assignments;
 
   List<RoomNote> _notes = [];
   List<RoomNote> get notes => _notes;
@@ -142,143 +181,163 @@ class AssignmentService extends ChangeNotifier {
   List<ActivityLogEntry> _activityLog = [];
   List<ActivityLogEntry> get activityLog => _activityLog;
 
-  Future<List<Assignment>> loadMyAssignments(String staffId) async {
-    try {
-      final data = await _client
-          .from('room_assignments')
-          .select('''
-            id, room_id, staff_id, assigned_at, completed_at,
-            room:rooms(id, number, status, room_type_id, floor_id,
-              room_type:room_types(name),
-              floor:floors(name, number))
-          ''')
-          .eq('staff_id', staffId)
-          .filter('completed_at', 'is', null)
-          .order('assigned_at', ascending: false);
+  // --- Floor Assignments ---
 
-      _assignments = (data as List)
-          .map((json) => Assignment.fromJson(json))
-          .toList();
-      notifyListeners();
-      return _assignments;
-    } catch (e) {
-      debugPrint('Error loading assignments: $e');
-      return [];
-    }
-  }
-
-  Future<bool> assignRoom({
-    required String roomId,
+  Future<bool> assignFloorToStaff({
     required String staffId,
+    required String floorId,
+    required DateTime date,
   }) async {
     try {
-      // Get room number and staff name for notification
-      final roomData =
-          await _client.from('rooms').select('number').eq('id', roomId).single();
-      final staffData =
-          await _client.from('staff').select('name').eq('id', staffId).single();
+      final dateStr = date.toIso8601String().substring(0, 10);
 
-      await _client.from('room_assignments').insert({
-        'room_id': roomId,
+      final floorData = await _client
+          .from('floors')
+          .select('name')
+          .eq('id', floorId)
+          .single();
+
+      await _client.from('floor_assignments').upsert({
         'staff_id': staffId,
-      });
+        'floor_id': floorId,
+        'assignment_date': dateStr,
+      }, onConflict: 'staff_id,floor_id,assignment_date');
 
       await _logActivity(
-        action: 'room_assigned',
+        action: 'floor_assigned',
         details: {
-          'room_id': roomId,
-          'room_number': roomData['number'] as String,
+          'floor_id': floorId,
+          'floor_name': floorData['name'] as String,
           'staff_id': staffId,
+          'date': dateStr,
         },
-      );
-
-      NotificationService().notifyRoomAssigned(
-        roomNumber: roomData['number'] as String,
-        staffName: staffData['name'] as String,
       );
 
       return true;
     } catch (e) {
-      debugPrint('Error assigning room: $e');
+      debugPrint('Error assigning floor: $e');
       return false;
     }
   }
 
-  Future<bool> completeAssignment(String assignmentId) async {
+  Future<bool> unassignFloorFromStaff({
+    required String staffId,
+    required String floorId,
+    required DateTime date,
+  }) async {
     try {
-      final assignment = _assignments.firstWhere(
-        (a) => a.id == assignmentId,
-        orElse: () => Assignment(id: '', roomId: '', staffId: '', assignedAt: DateTime.now()),
-      );
-      final roomNumber = assignment.room?.number;
-
+      final dateStr = date.toIso8601String().substring(0, 10);
       await _client
-          .from('room_assignments')
-          .update({'completed_at': DateTime.now().toIso8601String()})
-          .eq('id', assignmentId);
-
-      await _logActivity(
-        action: 'assignment_completed',
-        details: {
-          'assignment_id': assignmentId,
-          'room_number': roomNumber,
-        },
-      );
-
-      _assignments.removeWhere((a) => a.id == assignmentId);
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error completing assignment: $e');
-      return false;
-    }
-  }
-
-  Future<bool> unassignRoom(String assignmentId) async {
-    try {
-      final assignment = _assignments.firstWhere(
-        (a) => a.id == assignmentId,
-        orElse: () => Assignment(id: '', roomId: '', staffId: '', assignedAt: DateTime.now()),
-      );
-      final roomNumber = assignment.room?.number;
-
-      await _client.from('room_assignments').delete().eq('id', assignmentId);
-
-      await _logActivity(
-        action: 'room_unassigned',
-        details: {
-          'assignment_id': assignmentId,
-          'room_number': roomNumber,
-        },
-      );
-
-      _assignments.removeWhere((a) => a.id == assignmentId);
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error unassigning room: $e');
-      return false;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getStaffAssignments(String staffId) async {
-    try {
-      final data = await _client
-          .from('room_assignments')
-          .select('id, room_id, assigned_at, completed_at, rooms!inner(id, number, status)')
+          .from('floor_assignments')
+          .delete()
           .eq('staff_id', staffId)
-          .order('assigned_at', ascending: false);
-      return (data as List).cast<Map<String, dynamic>>();
+          .eq('floor_id', floorId)
+          .eq('assignment_date', dateStr);
+
+      await _logActivity(
+        action: 'floor_unassigned',
+        details: {
+          'floor_id': floorId,
+          'staff_id': staffId,
+          'date': dateStr,
+        },
+      );
+
+      return true;
     } catch (e) {
-      debugPrint('Error getting staff assignments: $e');
+      debugPrint('Error unassigning floor: $e');
+      return false;
+    }
+  }
+
+  Future<List<FloorAssignment>> loadFloorAssignmentsForDate(
+      DateTime date) async {
+    try {
+      final dateStr = date.toIso8601String().substring(0, 10);
+      final data = await _client
+          .from('floor_assignments')
+          .select('''
+            id, staff_id, floor_id, assignment_date,
+            staff:staff(name),
+            floor:floors(name, number)
+          ''')
+          .eq('assignment_date', dateStr);
+
+      return (data as List)
+          .map((json) => FloorAssignment.fromJson(json))
+          .toList();
+    } catch (e) {
+      debugPrint('Error loading floor assignments: $e');
       return [];
     }
   }
+
+  Future<List<FloorAssignment>> loadMyFloorAssignmentsForDate(
+      String staffId, DateTime date) async {
+    try {
+      final dateStr = date.toIso8601String().substring(0, 10);
+      final data = await _client
+          .from('floor_assignments')
+          .select('''
+            id, staff_id, floor_id, assignment_date,
+            floor:floors(name, number)
+          ''')
+          .eq('staff_id', staffId)
+          .eq('assignment_date', dateStr);
+
+      return (data as List)
+          .map((json) => FloorAssignment.fromJson(json))
+          .toList();
+    } catch (e) {
+      debugPrint('Error loading my floor assignments: $e');
+      return [];
+    }
+  }
+
+  Future<List<Room>> loadMyDirtyRoomsForDate(
+      String staffId, DateTime date) async {
+    try {
+      final dateStr = date.toIso8601String().substring(0, 10);
+
+      final floorData = await _client
+          .from('floor_assignments')
+          .select('floor_id')
+          .eq('staff_id', staffId)
+          .eq('assignment_date', dateStr);
+
+      if (floorData.isEmpty) return [];
+
+      final floorIds =
+          (floorData as List).map((f) => f['floor_id'] as String).toList();
+
+      final roomsData = await _client
+          .from('rooms')
+          .select('''
+            id, number, status, room_type_id, floor_id, description,
+            room_type:room_types(name),
+            floor:floors(name, number)
+          ''')
+          .inFilter('floor_id', floorIds)
+          .inFilter('status', ['dirty', 'in_progress']);
+
+      return (roomsData as List)
+          .map((json) => Room.fromJson(json))
+          .toList();
+    } catch (e) {
+      debugPrint('Error loading dirty rooms: $e');
+      return [];
+    }
+  }
+
+  // --- Room Status ---
 
   Future<bool> updateRoomStatus(String roomId, RoomStatus status) async {
     try {
-      final roomData =
-          await _client.from('rooms').select('number').eq('id', roomId).single();
+      final roomData = await _client
+          .from('rooms')
+          .select('number')
+          .eq('id', roomId)
+          .single();
 
       await _client
           .from('rooms')
@@ -305,6 +364,8 @@ class AssignmentService extends ChangeNotifier {
       return false;
     }
   }
+
+  // --- Room Notes ---
 
   Future<List<RoomNote>> loadNotes(String roomId) async {
     try {
@@ -337,10 +398,16 @@ class AssignmentService extends ChangeNotifier {
     String status = 'none',
   }) async {
     try {
-      final roomData =
-          await _client.from('rooms').select('number').eq('id', roomId).single();
-      final staffData =
-          await _client.from('staff').select('name').eq('id', staffId).single();
+      final roomData = await _client
+          .from('rooms')
+          .select('number')
+          .eq('id', roomId)
+          .single();
+      final staffData = await _client
+          .from('staff')
+          .select('name')
+          .eq('id', staffId)
+          .single();
 
       await _client.from('room_notes').insert({
         'room_id': roomId,
@@ -394,7 +461,10 @@ class AssignmentService extends ChangeNotifier {
         details: {'note_id': noteId, 'new_status': status},
       );
 
-      await _client.from('room_notes').update({'status': status}).eq('id', noteId);
+      await _client
+          .from('room_notes')
+          .update({'status': status})
+          .eq('id', noteId);
       return true;
     } catch (e) {
       debugPrint('Error updating note status: $e');
@@ -413,23 +483,13 @@ class AssignmentService extends ChangeNotifier {
         details: {'note_id': noteId},
       );
 
-      await _client.from('room_notes').update({
-        'title': title,
-        'content': content,
-      }).eq('id', noteId);
+      await _client
+          .from('room_notes')
+          .update({'title': title, 'content': content})
+          .eq('id', noteId);
       return true;
     } catch (e) {
       debugPrint('Error updating note: $e');
-      return false;
-    }
-  }
-
-  Future<bool> updateTodoTitle(String todoId, String title) async {
-    try {
-      await _client.from('personal_todos').update({'title': title}).eq('id', todoId);
-      return true;
-    } catch (e) {
-      debugPrint('Error updating todo title: $e');
       return false;
     }
   }
@@ -460,35 +520,6 @@ class AssignmentService extends ChangeNotifier {
     }
   }
 
-  Future<void> loadActivityLog({int limit = 20}) async {
-    try {
-      final data = await _client
-          .from('activity_log')
-          .select('''
-            id, staff_id, action, details, created_at,
-            staff:staff(name)
-          ''')
-          .order('created_at', ascending: false)
-          .limit(limit);
-
-      _activityLog = (data as List)
-          .map((json) => ActivityLogEntry.fromJson(json))
-          .toList();
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error loading activity log: $e');
-    }
-  }
-
-  Future<void> _logActivity({
-    required String action,
-    Map<String, dynamic>? details,
-  }) async {
-    await ActivityService().log(action: action, details: details);
-  }
-
-  // --- Recent Notes (all rooms) ---
-
   Future<List<RoomNote>> loadRecentNotes({int limit = 30}) async {
     try {
       final data = await _client
@@ -508,8 +539,6 @@ class AssignmentService extends ChangeNotifier {
       return [];
     }
   }
-
-  // --- Note Forwarding ---
 
   Future<bool> forwardNote({
     required String noteId,
@@ -551,6 +580,35 @@ class AssignmentService extends ChangeNotifier {
       debugPrint('Error loading forwarded notes: $e');
       return [];
     }
+  }
+
+  // --- Activity Log ---
+
+  Future<void> loadActivityLog({int limit = 20}) async {
+    try {
+      final data = await _client
+          .from('activity_log')
+          .select('''
+            id, staff_id, action, details, created_at,
+            staff:staff(name)
+          ''')
+          .order('created_at', ascending: false)
+          .limit(limit);
+
+      _activityLog = (data as List)
+          .map((json) => ActivityLogEntry.fromJson(json))
+          .toList();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error loading activity log: $e');
+    }
+  }
+
+  Future<void> _logActivity({
+    required String action,
+    Map<String, dynamic>? details,
+  }) async {
+    await ActivityService().log(action: action, details: details);
   }
 
   // --- Personal To-Do ---
@@ -614,7 +672,8 @@ class AssignmentService extends ChangeNotifier {
     try {
       await _client
           .from('personal_todos')
-          .update({'is_done': isDone}).eq('id', todoId);
+          .update({'is_done': isDone})
+          .eq('id', todoId);
       return true;
     } catch (e) {
       debugPrint('Error toggling todo: $e');
@@ -638,7 +697,20 @@ class AssignmentService extends ChangeNotifier {
     }
   }
 
-  // --- Todo List Items (checkable lists) ---
+  Future<bool> updateTodoTitle(String todoId, String title) async {
+    try {
+      await _client
+          .from('personal_todos')
+          .update({'title': title})
+          .eq('id', todoId);
+      return true;
+    } catch (e) {
+      debugPrint('Error updating todo title: $e');
+      return false;
+    }
+  }
+
+  // --- Todo List Items ---
 
   Future<List<TodoListItem>> loadTodoListItems(String todoId) async {
     try {
@@ -663,10 +735,7 @@ class AssignmentService extends ChangeNotifier {
     try {
       final data = await _client
           .from('todo_list_items')
-          .insert({
-            'todo_id': todoId,
-            'title': title,
-          })
+          .insert({'todo_id': todoId, 'title': title})
           .select()
           .single();
 
@@ -686,7 +755,8 @@ class AssignmentService extends ChangeNotifier {
     try {
       await _client
           .from('todo_list_items')
-          .update({'is_done': isDone}).eq('id', itemId);
+          .update({'is_done': isDone})
+          .eq('id', itemId);
       return true;
     } catch (e) {
       debugPrint('Error toggling todo list item: $e');
@@ -708,11 +778,396 @@ class AssignmentService extends ChangeNotifier {
     try {
       await _client
           .from('todo_list_items')
-          .update({'title': title}).eq('id', itemId);
+          .update({'title': title})
+          .eq('id', itemId);
       return true;
     } catch (e) {
-      debugPrint('Error updating todo list item: $e');
+      debugPrint('Error updating todo list item title: $e');
       return false;
+    }
+  }
+
+  // --- Note Sharing ---
+
+  Future<void> shareNote({
+    required String noteType,
+    required String noteId,
+    required List<String> sharedWithStaffIds,
+    required String sharedByStaffId,
+  }) async {
+    try {
+      final shares = sharedWithStaffIds
+          .map((staffId) => {
+                'note_type': noteType,
+                'note_id': noteId,
+                'shared_with': staffId,
+                'shared_by': sharedByStaffId,
+              })
+          .toList();
+
+      await _client.from('note_shares').upsert(
+            shares,
+            onConflict: 'note_type,note_id,shared_with',
+          );
+    } catch (e) {
+      debugPrint('Error sharing note: $e');
+    }
+  }
+
+  Future<void> unshareNote({
+    required String noteType,
+    required String noteId,
+  }) async {
+    try {
+      await _client
+          .from('note_shares')
+          .delete()
+          .eq('note_type', noteType)
+          .eq('note_id', noteId);
+    } catch (e) {
+      debugPrint('Error unsharing note: $e');
+    }
+  }
+
+  Future<void> removeReceivedShare({
+    required String noteType,
+    required String noteId,
+    required String sharedWithStaffId,
+  }) async {
+    try {
+      await _client
+          .from('note_shares')
+          .delete()
+          .eq('note_type', noteType)
+          .eq('note_id', noteId)
+          .eq('shared_with', sharedWithStaffId);
+    } catch (e) {
+      debugPrint('Error removing received share: $e');
+    }
+  }
+
+  Future<void> clearAllReceivedNotes(String staffId) async {
+    try {
+      await _client.from('note_shares').delete().eq('shared_with', staffId);
+    } catch (e) {
+      debugPrint('Error clearing received notes: $e');
+    }
+  }
+
+  Future<List<SharedNote>> loadReceivedNotes(String staffId) async {
+    try {
+      final data = await _client
+          .from('note_shares')
+          .select('''
+            id, note_type, note_id, is_read, created_at,
+            shared_by_staff:shared_by(name)
+          ''')
+          .eq('shared_with', staffId)
+          .order('created_at', ascending: false);
+
+      final shares = (data as List).toList();
+      if (shares.isEmpty) return [];
+
+      final roomNoteIds = <String>[];
+      final todoIds = <String>[];
+      for (final share in shares) {
+        if (share['note_type'] == 'room_note') {
+          roomNoteIds.add(share['note_id'] as String);
+        } else if (share['note_type'] == 'todo') {
+          todoIds.add(share['note_id'] as String);
+        }
+      }
+
+      final Map<String, dynamic> roomNotesMap = {};
+      if (roomNoteIds.isNotEmpty) {
+        final notesData = await _client
+            .from('room_notes')
+            .select('id, title, content, status, room:rooms(number)')
+            .inFilter('id', roomNoteIds);
+        for (final n in notesData as List) {
+          roomNotesMap[n['id'] as String] = n;
+        }
+      }
+
+      final Map<String, dynamic> todosMap = {};
+      if (todoIds.isNotEmpty) {
+        final todosData = await _client
+            .from('personal_todos')
+            .select('id, title, is_done')
+            .inFilter('id', todoIds);
+        for (final t in todosData as List) {
+          todosMap[t['id'] as String] = t;
+        }
+      }
+
+      return shares.map((json) {
+        final noteType = json['note_type'] as String;
+        final noteId = json['note_id'] as String;
+        final sharedByName =
+            (json['shared_by_staff'] as Map<String, dynamic>?)?['name']
+                as String?;
+
+        String? noteTitle;
+        String? noteContent;
+        String? noteStatus;
+        String? roomNumber;
+
+        if (noteType == 'room_note') {
+          final note = roomNotesMap[noteId];
+          if (note != null) {
+            noteTitle = note['title'] as String?;
+            noteContent = note['content'] as String?;
+            noteStatus = note['status'] as String?;
+            roomNumber = (note['room'] as Map<String, dynamic>?)?['number']
+                as String?;
+          }
+        } else if (noteType == 'todo') {
+          final todo = todosMap[noteId];
+          if (todo != null) {
+            noteTitle = todo['title'] as String?;
+            noteContent = null;
+            noteStatus =
+                (todo['is_done'] as bool?) == true ? 'done' : 'none';
+          }
+        }
+
+        return SharedNote(
+          noteId: noteId,
+          noteType: noteType,
+          isRead: json['is_read'] as bool? ?? false,
+          sharedByName: sharedByName ?? 'Unknown',
+          roomNumber: roomNumber,
+          noteTitle: noteTitle,
+          noteContent: noteContent,
+          noteStatus: noteStatus,
+          sharedAt:
+              DateTime.parse(json['created_at'] as String).toLocal(),
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Error loading received notes: $e');
+      return [];
+    }
+  }
+
+  Future<void> markAsRead(String noteType, String noteId, String staffId) async {
+    try {
+      await _client
+          .from('note_shares')
+          .update({'is_read': true})
+          .eq('note_type', noteType)
+          .eq('note_id', noteId)
+          .eq('shared_with', staffId);
+    } catch (e) {
+      debugPrint('Error marking as read: $e');
+    }
+  }
+
+  Future<int> getUnreadCount(String staffId) async {
+    try {
+      final data = await _client
+          .from('note_shares')
+          .select('id')
+          .eq('shared_with', staffId)
+          .eq('is_read', false);
+
+      return (data as List).length;
+    } catch (e) {
+      debugPrint('Error getting unread count: $e');
+      return 0;
+    }
+  }
+
+  Future<void> updateShares({
+    required String noteType,
+    required String noteId,
+    required List<String> newStaffIds,
+    required String sharedByStaffId,
+  }) async {
+    try {
+      await _client
+          .from('note_shares')
+          .delete()
+          .eq('note_type', noteType)
+          .eq('note_id', noteId);
+
+      if (newStaffIds.isNotEmpty) {
+        await shareNote(
+          noteType: noteType,
+          noteId: noteId,
+          sharedWithStaffIds: newStaffIds,
+          sharedByStaffId: sharedByStaffId,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error updating shares: $e');
+    }
+  }
+
+  // --- Staff Notes ---
+
+  Future<StaffNote?> createStaffNote({
+    required String title,
+    required String content,
+    required String createdByStaffId,
+    required List<String> sharedWithStaffIds,
+  }) async {
+    try {
+      final data = await _client
+          .from('staff_notes')
+          .insert({
+            'title': title,
+            'content': content,
+            'created_by': createdByStaffId,
+          })
+          .select()
+          .single();
+
+      final note = StaffNote.fromJson(data);
+
+      if (sharedWithStaffIds.isNotEmpty) {
+        await shareNote(
+          noteType: 'staff_note',
+          noteId: note.id,
+          sharedWithStaffIds: sharedWithStaffIds,
+          sharedByStaffId: createdByStaffId,
+        );
+      }
+
+      return note;
+    } catch (e) {
+      debugPrint('Error creating staff note: $e');
+      return null;
+    }
+  }
+
+  Future<List<StaffNote>> loadStaffNotesCreatedBy(String staffId) async {
+    try {
+      final data = await _client
+          .from('staff_notes')
+          .select('''
+            *,
+            created_by_staff:staff!staff_notes_created_by_fkey(name)
+          ''')
+          .eq('created_by', staffId)
+          .order('created_at', ascending: false);
+
+      final notes = <StaffNote>[];
+      for (final json in data as List) {
+        final note = StaffNote.fromJson(json);
+
+        final shares = await _client
+            .from('note_shares')
+            .select('shared_with, staff!note_shares_shared_with_fkey(name)')
+            .eq('note_type', 'staff_note')
+            .eq('note_id', note.id);
+
+        final shareList = shares as List;
+        notes.add(StaffNote(
+          id: note.id,
+          title: note.title,
+          content: note.content,
+          createdBy: note.createdBy,
+          createdByName: note.createdByName,
+          createdAt: note.createdAt,
+          sharedWithIds: shareList
+              .map((s) => s['shared_with'] as String)
+              .toList(),
+          sharedWithNames: shareList
+              .map((s) =>
+                  (s['staff'] as Map<String, dynamic>?)?['name'] as String? ??
+                  '')
+              .toList(),
+        ));
+      }
+
+      return notes;
+    } catch (e) {
+      debugPrint('Error loading staff notes: $e');
+      return [];
+    }
+  }
+
+  Future<bool> updateStaffNote({
+    required String noteId,
+    required String title,
+    required String content,
+    required String sharedByStaffId,
+    required List<String> newStaffIds,
+  }) async {
+    try {
+      await _client
+          .from('staff_notes')
+          .update({'title': title, 'content': content})
+          .eq('id', noteId);
+
+      await updateShares(
+        noteType: 'staff_note',
+        noteId: noteId,
+        newStaffIds: newStaffIds,
+        sharedByStaffId: sharedByStaffId,
+      );
+
+      return true;
+    } catch (e) {
+      debugPrint('Error updating staff note: $e');
+      return false;
+    }
+  }
+
+  Future<bool> deleteStaffNote(String noteId) async {
+    try {
+      await _client.from('staff_notes').delete().eq('id', noteId);
+      return true;
+    } catch (e) {
+      debugPrint('Error deleting staff note: $e');
+      return false;
+    }
+  }
+
+  Future<List<StaffNote>> loadReceivedStaffNotes(String staffId) async {
+    try {
+      final shares = await _client
+          .from('note_shares')
+          .select('note_id, is_read')
+          .eq('note_type', 'staff_note')
+          .eq('shared_with', staffId);
+
+      final shareList = shares as List;
+      if (shareList.isEmpty) return [];
+
+      final noteIds = shareList.map((s) => s['note_id'] as String).toList();
+      final readMap = {
+        for (final s in shareList) s['note_id'] as String: s['is_read'] as bool
+      };
+
+      final notesData = await _client
+          .from('staff_notes')
+          .select('''
+            id, title, content, created_by, created_at,
+            created_by_staff:staff!staff_notes_created_by_fkey(name)
+          ''')
+          .inFilter('id', noteIds);
+
+      final notes = <StaffNote>[];
+      for (final json in notesData as List) {
+        notes.add(StaffNote(
+          id: json['id'] as String,
+          title: json['title'] as String,
+          content: json['content'] as String,
+          createdBy: json['created_by'] as String,
+          createdByName:
+              (json['created_by_staff'] as Map<String, dynamic>?)?['name']
+                  as String?,
+          createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+          isRead: readMap[json['id'] as String] ?? false,
+        ));
+      }
+
+      return notes;
+    } catch (e) {
+      debugPrint('Error loading received staff notes: $e');
+      return [];
     }
   }
 }

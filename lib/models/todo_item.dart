@@ -24,7 +24,7 @@ class TodoItem {
       title: json['title'] as String,
       isDone: json['is_done'] as bool,
       type: json['type'] as String? ?? 'single',
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:routefly/routefly.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../widgets/animations.dart';
@@ -69,8 +70,18 @@ class _SplashPageState extends State<SplashPage>
         return;
       }
 
+      // Check keepLoggedIn preference
+      final prefs = await SharedPreferences.getInstance();
+      final keepLoggedIn = prefs.getBool('keepLoggedIn_${user.id}') ?? true;
+
+      if (!keepLoggedIn) {
+        await Supabase.instance.client.auth.signOut();
+        Routefly.navigate('/login');
+        return;
+      }
+
       final role = data['role'] as String;
-      if (role == 'receptionist') {
+      if (role == 'receptionist' || role == 'manager') {
         Routefly.navigate('/admin/overview');
       } else {
         Routefly.navigate('/staff/home/staff_dashboard');
@@ -92,10 +103,10 @@ class _SplashPageState extends State<SplashPage>
               delay: const Duration(milliseconds: 100),
               duration: const Duration(milliseconds: 600),
               beginScale: 0.5,
-              child: Icon(
-                Icons.cleaning_services_outlined,
-                size: 80,
-                color: Theme.of(context).colorScheme.primary,
+              child: Image.asset(
+                'assets/icons/icon_hk_app.png',
+                width: 120,
+                height: 120,
               ),
             ),
             const SizedBox(height: 24),

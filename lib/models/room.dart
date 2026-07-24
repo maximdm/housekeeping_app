@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 enum RoomStatus {
   dirty,
   inProgress,
-  clean;
+  clean,
+  skipped;
 
   String get label {
     switch (this) {
@@ -13,6 +14,8 @@ enum RoomStatus {
         return 'In Progress';
       case RoomStatus.clean:
         return 'Clean';
+      case RoomStatus.skipped:
+        return 'Skipped';
     }
   }
 
@@ -24,6 +27,21 @@ enum RoomStatus {
         return Colors.blue;
       case RoomStatus.clean:
         return Colors.green;
+      case RoomStatus.skipped:
+        return Colors.red;
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case RoomStatus.dirty:
+        return Icons.cleaning_services_outlined;
+      case RoomStatus.inProgress:
+        return Icons.sync;
+      case RoomStatus.clean:
+        return Icons.check_circle_outline;
+      case RoomStatus.skipped:
+        return Icons.skip_next_outlined;
     }
   }
 
@@ -35,6 +53,8 @@ enum RoomStatus {
         return 'in_progress';
       case RoomStatus.clean:
         return 'clean';
+      case RoomStatus.skipped:
+        return 'skipped';
     }
   }
 
@@ -46,6 +66,8 @@ enum RoomStatus {
         return RoomStatus.inProgress;
       case 'clean':
         return RoomStatus.clean;
+      case 'skipped':
+        return RoomStatus.skipped;
       default:
         return RoomStatus.dirty;
     }
@@ -98,11 +120,35 @@ class Room {
 
   int get _sortKey {
     final n = int.tryParse(floorNumber ?? '0') ?? 0;
-    final r = int.tryParse(number) ?? 0;
-    return n * 1000 + r;
+    final digitMatch = RegExp(r'\d+').firstMatch(number);
+    final r = digitMatch != null ? int.parse(digitMatch.group(0)!) : 0;
+    return n * 10000 + r;
   }
 
   static int compare(Room a, Room b) => a._sortKey.compareTo(b._sortKey);
+
+  static int _statusOrder(RoomStatus s) {
+    switch (s) {
+      case RoomStatus.dirty:
+        return 0;
+      case RoomStatus.inProgress:
+        return 1;
+      case RoomStatus.skipped:
+        return 2;
+      case RoomStatus.clean:
+        return 3;
+    }
+  }
+
+  static int compareByStatus(Room a, Room b) {
+    final sc = _statusOrder(a.status).compareTo(_statusOrder(b.status));
+    if (sc != 0) return sc;
+    final aP = a.number.toUpperCase().startsWith('P') ? 0 : 1;
+    final bP = b.number.toUpperCase().startsWith('P') ? 0 : 1;
+    final pc = aP.compareTo(bP);
+    if (pc != 0) return pc;
+    return a._sortKey.compareTo(b._sortKey);
+  }
 
   Map<String, dynamic> toJson() {
     return {

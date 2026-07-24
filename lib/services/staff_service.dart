@@ -20,53 +20,13 @@ class StaffService extends ChangeNotifier {
   Future<void> loadStaff() async {
     try {
       final data = await _client.from('staff').select('''
-        id, user_id, name, account_name, role, phone, is_active, on_shift,
-        room_assignments!inner(count)
+        id, user_id, name, account_name, role, phone, is_active, on_shift
       ''').order('name');
 
-      _staff = (data as List).map((json) {
-        final assignments = json['room_assignments'] as List?;
-        return StaffMember.fromJson({
-          ...json,
-          'assigned_rooms': assignments?.length ?? 0,
-        });
-      }).toList();
-
+      _staff = (data as List).map((json) => StaffMember.fromJson(json)).toList();
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading staff: $e');
-      try {
-        final data = await _client.from('staff').select('''
-          id, user_id, name, account_name, role, phone, is_active, on_shift
-        ''').order('name');
-        _staff = (data as List).map((json) => StaffMember.fromJson(json)).toList();
-        notifyListeners();
-      } catch (e2) {
-        debugPrint('Error loading staff (on_shift fallback): $e2');
-        try {
-          final data = await _client.from('staff').select('''
-            id, user_id, name, account_name, role, phone, is_active,
-            room_assignments!inner(count)
-          ''').order('name');
-          _staff = (data as List).map((json) {
-            final assignments = json['room_assignments'] as List?;
-            return StaffMember.fromJson({
-              ...json,
-              'assigned_rooms': assignments?.length ?? 0,
-            });
-          }).toList();
-          notifyListeners();
-        } catch (e3) {
-          debugPrint('Error loading staff (final fallback): $e3');
-          try {
-            final data = await _client.from('staff').select().order('name');
-            _staff = (data as List).map((json) => StaffMember.fromJson(json)).toList();
-            notifyListeners();
-          } catch (e4) {
-            debugPrint('Error loading staff (last resort): $e4');
-          }
-        }
-      }
     }
   }
 
@@ -204,9 +164,22 @@ class StaffService extends ChangeNotifier {
 
   Future<bool> deleteStaff(String id) async {
     try {
-      final member = getStaffById(id);
-      final userId = member?.userId;
+      // Try local list first, fall back to DB query
+      var member = getStaffById(id);
+      var userId = member?.userId;
       final staffName = member?.name;
+
+      if (userId == null) {
+        // Staff was already removed from local list (optimistic UI) — query DB
+        try {
+          final row = await _client
+              .from('staff')
+              .select('user_id, name')
+              .eq('id', id)
+              .maybeSingle();
+          userId = row?['user_id'] as String?;
+        } catch (_) {}
+      }
 
       final response = await _client.from('staff').delete().eq('id', id).select();
       if (response.isEmpty) {

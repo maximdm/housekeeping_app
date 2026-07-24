@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets / dart-define credentials
+dart_defines.json
+.env
+.env.*

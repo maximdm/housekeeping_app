@@ -294,7 +294,7 @@ class ChatService extends ChangeNotifier {
         senderName: row['sender_name'] as String? ?? '',
         senderRole: StaffRole.fromString(row['sender_role'] as String? ?? 'cleaner'),
         content: row['content'] as String,
-        createdAt: DateTime.parse(row['created_at'] as String),
+        createdAt: DateTime.parse(row['created_at'] as String).toLocal(),
       )).toList();
       notifyListeners();
     } catch (e) {

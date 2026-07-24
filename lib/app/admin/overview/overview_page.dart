@@ -19,12 +19,13 @@ class _OverviewPageState extends State<OverviewPage> {
   int _cleanRooms = 0;
   int _dirtyRooms = 0;
   int _inProgressRooms = 0;
-  int _activeStaff = 0;
-  int _totalRooms = 0;
+  int _skippedRooms = 0;
 
   List<ActivityLogEntry> _recentActivity = [];
   List<_PriorityAlert> _priorityAlerts = [];
   int _activityLimit = 10;
+
+  List<Map<String, dynamic>> _allRooms = [];
 
   bool _loading = true;
 
@@ -39,11 +40,11 @@ class _OverviewPageState extends State<OverviewPage> {
 
     try {
       final results = await Future.wait([
-        _client.from('rooms').select('status'),
-        _client
-            .from('staff')
-            .select('is_active')
-            .eq('is_active', true),
+        _client.from('rooms').select('''
+          id, number, status, description,
+          room_type:room_types(name),
+          floor:floors(name, number)
+        '''),
         _client.from('activity_log').select('''
           id, staff_id, action, details, created_at,
           staff:staff(name)
@@ -51,23 +52,30 @@ class _OverviewPageState extends State<OverviewPage> {
       ]);
 
       final rooms = results[0] as List;
-      _totalRooms = rooms.length;
+      _allRooms = rooms.cast<Map<String, dynamic>>();
       _cleanRooms =
           rooms.where((r) => r['status'] == 'clean').length;
       _dirtyRooms =
           rooms.where((r) => r['status'] == 'dirty').length;
       _inProgressRooms =
           rooms.where((r) => r['status'] == 'in_progress').length;
+      _skippedRooms =
+          rooms.where((r) => r['status'] == 'skipped').length;
 
-      final staff = results[1] as List;
-      _activeStaff = staff.length;
-
-      final activity = results[2] as List;
+      final activity = results[1] as List;
       _recentActivity = activity
           .map((json) => ActivityLogEntry.fromJson(json))
           .toList();
 
       _priorityAlerts = [];
+      if (_skippedRooms > 0) {
+        _priorityAlerts.add(_PriorityAlert(
+          icon: Icons.warning_amber_rounded,
+          color: Colors.red,
+          text:
+              '$_skippedRooms room${_skippedRooms > 1 ? 's' : ''} skipped — requires attention',
+        ));
+      }
       if (_dirtyRooms > 0) {
         _priorityAlerts.add(_PriorityAlert(
           icon: Icons.cleaning_services_outlined,
@@ -82,13 +90,6 @@ class _OverviewPageState extends State<OverviewPage> {
           color: Colors.blue,
           text:
               '$_inProgressRooms room${_inProgressRooms > 1 ? 's' : ''} in progress',
-        ));
-      }
-      if (_activeStaff == 0 && _totalRooms > 0) {
-        _priorityAlerts.add(_PriorityAlert(
-          icon: Icons.people_outline,
-          color: Colors.red,
-          text: 'No staff members currently active',
         ));
       }
     } catch (e) {
@@ -122,7 +123,7 @@ class _OverviewPageState extends State<OverviewPage> {
       currentRoute: '/admin/overview',
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Dashboard'),
+          title: Text(localizations.tr('dashboard')),
           actions: [
             IconButton(
               icon: const Icon(Icons.notifications_none),
@@ -141,7 +142,7 @@ class _OverviewPageState extends State<OverviewPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "Today's Progress",
+                        localizations.tr('todayProgress'),
                         style: Theme.of(context)
                             .textTheme
                             .titleLarge
@@ -154,7 +155,7 @@ class _OverviewPageState extends State<OverviewPage> {
                       if (isMobile) ...[
                         _buildPriorityTasksCard(context),
                         const SizedBox(height: 16),
-                        _buildRecentActivityCard(context),
+                        _buildRecentActivityCard(context, isMobile),
                       ] else
                         Row(
                           crossAxisAlignment:
@@ -163,7 +164,7 @@ class _OverviewPageState extends State<OverviewPage> {
                             Expanded(
                               flex: 2,
                               child:
-                                  _buildRecentActivityCard(context),
+                                  _buildRecentActivityCard(context, isMobile),
                             ),
                             const SizedBox(width: 24),
                             Expanded(
@@ -183,14 +184,14 @@ class _OverviewPageState extends State<OverviewPage> {
 
   Widget _buildMetricsGrid(bool isMobile) {
     final metrics = [
-      ('Clean Rooms', '$_cleanRooms', Icons.check_circle_outline,
-          Colors.green),
-      ('Needs Cleaning', '$_dirtyRooms',
-          Icons.cleaning_services_outlined, Colors.orange),
-      ('In Progress', '$_inProgressRooms', Icons.sync,
-          Colors.blue),
-      ('Active Staff', '$_activeStaff', Icons.people_outline,
-          Colors.purple),
+      (localizations.tr('cleanRooms'), '$_cleanRooms', Icons.check_circle_outline,
+          Colors.green, 'clean'),
+      (localizations.tr('needsCleaning'), '$_dirtyRooms',
+          Icons.cleaning_services_outlined, Colors.orange, 'dirty'),
+      (localizations.tr('inProgress'), '$_inProgressRooms', Icons.sync,
+          Colors.blue, 'in_progress'),
+      (localizations.tr('skipped'), '$_skippedRooms', Icons.skip_next_outlined,
+          Colors.red, 'skipped'),
     ];
 
     if (isMobile) {
@@ -203,7 +204,7 @@ class _OverviewPageState extends State<OverviewPage> {
         childAspectRatio: 1.8,
         children: metrics
             .map((m) => _buildMetricCard(
-                context, m.$1, m.$2, m.$3, m.$4))
+                context, m.$1, m.$2, m.$3, m.$4, () => _showMetricDetail(m.$5)))
             .toList(),
       );
     }
@@ -215,7 +216,7 @@ class _OverviewPageState extends State<OverviewPage> {
           .map((m) => SizedBox(
                 width: 220,
                 child: _buildMetricCard(
-                    context, m.$1, m.$2, m.$3, m.$4),
+                    context, m.$1, m.$2, m.$3, m.$4, () => _showMetricDetail(m.$5)),
               ))
           .toList(),
     );
@@ -227,8 +228,12 @@ class _OverviewPageState extends State<OverviewPage> {
     String value,
     IconData icon,
     Color color,
+    VoidCallback? onTap,
   ) {
-    return Container(
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
@@ -272,10 +277,108 @@ class _OverviewPageState extends State<OverviewPage> {
           ),
         ],
       ),
+      ),
     );
   }
 
-  Widget _buildRecentActivityCard(BuildContext context) {
+  void _showMetricDetail(String filter) {
+    String title;
+    Color accentColor;
+    List<Widget> items;
+
+    final filtered = _allRooms.where((r) => r['status'] == filter).toList();
+    final labels = {
+      'clean': 'Clean',
+      'dirty': 'Needs Cleaning',
+      'in_progress': 'In Progress',
+      'skipped': 'Skipped',
+    };
+    final colors = {
+      'clean': Colors.green,
+      'dirty': Colors.orange,
+      'in_progress': Colors.blue,
+      'skipped': Colors.red,
+    };
+    title = '${labels[filter] ?? filter} Rooms (${filtered.length})';
+    accentColor = colors[filter] ?? Colors.grey;
+
+    items = filtered.map((r) {
+      final typeName = (r['room_type'] as Map<String, dynamic>?)?['name'] as String? ?? '';
+      final floorNum = (r['floor'] as Map<String, dynamic>?)?['number']?.toString() ?? '';
+      final floorName = (r['floor'] as Map<String, dynamic>?)?['name'] as String?;
+      final floorLabel = floorName != null ? '$floorName ($floorNum)' : 'Floor $floorNum';
+      return ListTile(
+        leading: CircleAvatar(
+          backgroundColor: accentColor.withValues(alpha: 0.15),
+          child: Text(
+            r['number'] as String? ?? '?',
+            style: TextStyle(color: accentColor, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ),
+        title: Text('Room ${r['number']}'),
+        subtitle: Text('$typeName  ·  $floorLabel'),
+      );
+    }).toList();
+
+    final finalAccent = accentColor;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (ctx, scrollController) => Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 16, 16, 0),
+              child: Row(
+                children: [
+                  Container(
+                    width: 4, height: 20,
+                    decoration: BoxDecoration(
+                      color: finalAccent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            Divider(color: finalAccent.withValues(alpha: 0.3), height: 1),
+            Expanded(
+              child: items.isEmpty
+                  ? Center(
+                      child: Text(
+                        localizations.tr('noItems'),
+                        style: TextStyle(color: Colors.grey[500]),
+                      ),
+                    )
+                  : ListView(controller: scrollController, children: items),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecentActivityCard(BuildContext context, bool isMobile) {
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -292,32 +395,55 @@ class _OverviewPageState extends State<OverviewPage> {
             Row(
               children: [
                 Text(
-                  'Recent Activity',
+                  localizations.tr('recentActivity'),
                   style: Theme.of(context)
                       .textTheme
                       .titleMedium
                       ?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
-                SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment(value: 5, label: Text('5')),
-                    ButtonSegment(value: 10, label: Text('10')),
-                    ButtonSegment(value: 20, label: Text('20')),
-                  ],
-                  selected: {_activityLimit},
-                  onSelectionChanged: (selected) {
-                    _activityLimit = selected.first;
-                    _loadActivity();
-                  },
-                  style: ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    textStyle: WidgetStateProperty.all(
-                      const TextStyle(fontSize: 12),
+                if (isMobile)
+                  DropdownButton<int>(
+                    value: _activityLimit,
+                    underline: const SizedBox.shrink(),
+                    isDense: true,
+                    dropdownColor: Theme.of(context).colorScheme.surface,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                    items: [
+                      DropdownMenuItem(value: 5, child: Text('5 ${localizations.tr('items')}')),
+                      DropdownMenuItem(value: 10, child: Text('10 ${localizations.tr('items')}')),
+                      DropdownMenuItem(value: 20, child: Text('20 ${localizations.tr('items')}')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        _activityLimit = value;
+                        _loadActivity();
+                      }
+                    },
+                  )
+                else
+                  SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(value: 5, label: Text('5')),
+                      ButtonSegment(value: 10, label: Text('10')),
+                      ButtonSegment(value: 20, label: Text('20')),
+                    ],
+                    selected: {_activityLimit},
+                    onSelectionChanged: (selected) {
+                      _activityLimit = selected.first;
+                      _loadActivity();
+                    },
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: WidgetStateProperty.all(
+                        const TextStyle(fontSize: 12),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
             const Divider(height: 32),
@@ -327,7 +453,7 @@ class _OverviewPageState extends State<OverviewPage> {
                     const EdgeInsets.symmetric(vertical: 16),
                 child: Center(
                   child: Text(
-                    'No recent activity',
+                    localizations.tr('noRecentActivity'),
                     style: TextStyle(color: Colors.grey[500]),
                   ),
                 ),
@@ -374,13 +500,13 @@ class _OverviewPageState extends State<OverviewPage> {
                     final confirmed = await showDialog<bool>(
                       context: context,
                       builder: (ctx) => AlertDialog(
-                        title: const Text('Clear Activity'),
-                        content: const Text(
-                            'Delete all activity logs? This cannot be undone.'),
+                        title: Text(localizations.tr('clearActivity')),
+                        content: Text(
+                            localizations.tr('clearActivityConfirm')),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
+                            child: Text(localizations.tr('cancel')),
                           ),
                           TextButton(
                             onPressed: () => Navigator.pop(ctx, true),
@@ -394,14 +520,14 @@ class _OverviewPageState extends State<OverviewPage> {
                       if (mounted) {
                         setState(() => _recentActivity = []);
                         showTimedSnackBar(
-                          const SnackBar(
-                              content: Text('Activity cleared')),
+                          SnackBar(
+                              content: Text(localizations.tr('activityCleared'))),
                         );
                       }
                     }
                   },
                   icon: const Icon(Icons.delete_outline, size: 16),
-                  label: const Text('Clear Activity'),
+                  label: Text(localizations.tr('clearActivity')),
                 ),
               ),
             ],
@@ -433,7 +559,7 @@ class _OverviewPageState extends State<OverviewPage> {
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    'Priority Attention',
+                    localizations.tr('priorityAttention'),
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context)
                         .textTheme
@@ -452,7 +578,7 @@ class _OverviewPageState extends State<OverviewPage> {
                 padding:
                     const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  'All clear! No priority issues.',
+                  localizations.tr('allClear'),
                   style: TextStyle(color: Colors.grey[600]),
                 ),
               )
