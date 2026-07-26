@@ -207,26 +207,19 @@ class _ChatPageState extends State<ChatPage> {
 
   void _deleteMessage(ChatMessage message) {
     final deleted = message;
-    setState(() => _chatService.messages.removeWhere((m) => m.id == message.id));
-    Timer? undoTimer;
+    _chatService.deleteMessage(deleted.id);
     showTimedSnackBar(
       SnackBar(
         content: Text(localizations.tr('deleteMessageConfirm')),
         action: SnackBarAction(
           label: localizations.tr('undo'),
           onPressed: () {
-            undoTimer?.cancel();
             _chatService.restoreMessage(deleted);
           },
         ),
         duration: const Duration(seconds: 5),
       ),
     );
-    undoTimer = Timer(const Duration(seconds: 5), () async {
-      if (!mounted) return;
-      await _chatService.deleteMessage(deleted.id);
-    });
-    _pendingTimers.add(undoTimer);
   }
 
   void _clearChat() {
@@ -248,9 +241,7 @@ class _ChatPageState extends State<ChatPage> {
     );
     undoTimer = Timer(const Duration(seconds: 5), () async {
       if (!mounted) return;
-      for (final msg in savedMessages) {
-        await _chatService.deleteMessage(msg.id);
-      }
+      await _chatService.clearAllMessages();
     });
     _pendingTimers.add(undoTimer);
   }

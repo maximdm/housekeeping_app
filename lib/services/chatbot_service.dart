@@ -217,8 +217,18 @@ class ChatbotService {
     }
   }
 
-  void clearHistory() {
-    messages.clear();
+  Future<void> clearHistory() async {
+    if (_userId == null) return;
+    try {
+      await _client
+          .from('ai_chat_messages')
+          .delete()
+          .eq('user_id', _userId!)
+          .eq('archived', false);
+      messages.clear();
+    } catch (e) {
+      debugPrint('Error clearing AI chat history: $e');
+    }
   }
 
   // --- Chat Logic ---
