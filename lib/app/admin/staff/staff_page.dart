@@ -41,6 +41,7 @@ class _StaffPageState extends State<StaffPage> {
   final Set<String> _selectedStaffIds = {};
   String? _selectedShiftId;
   bool _assigning = false;
+  bool _clearingPast = false;
 
   @override
   void initState() {
@@ -547,15 +548,22 @@ class _StaffPageState extends State<StaffPage> {
     final isToday = date.year == today.year &&
         date.month == today.month &&
         date.day == today.day;
+    final isPast = date.isBefore(today) && !isToday;
     final isSelected = date.year == _selectedDate.year &&
         date.month == _selectedDate.month &&
         date.day == _selectedDate.day;
 
-    final dayAssignments = _assignmentsForDate
+    final dayAssignments = _monthAssignments
         .where((a) =>
             a.assignmentDate.year == date.year &&
             a.assignmentDate.month == date.month &&
             a.assignmentDate.day == date.day)
+        .toList();
+
+    final hasAssignments = dayAssignments.isNotEmpty;
+    final uniqueColors = dayAssignments
+        .map((a) => parseHexColor(a.shiftColor))
+        .toSet()
         .toList();
 
     return GestureDetector(
@@ -565,7 +573,7 @@ class _StaffPageState extends State<StaffPage> {
         setState(() {});
       },
       child: Container(
-        height: 44,
+        height: 48,
         margin: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           color: isSelected
@@ -575,7 +583,12 @@ class _StaffPageState extends State<StaffPage> {
                       .colorScheme
                       .primaryContainer
                       .withValues(alpha: 0.3)
-                  : null,
+                  : hasAssignments
+                      ? Theme.of(context)
+                          .colorScheme
+                          .primaryContainer
+                          .withValues(alpha: 0.12)
+                      : null,
           borderRadius: BorderRadius.circular(8),
           border: !isSelected && isToday
               ? Border.all(
@@ -589,29 +602,52 @@ class _StaffPageState extends State<StaffPage> {
               '${date.day}',
               style: TextStyle(
                 fontSize: 13,
-                fontWeight: (isToday || isSelected)
+                fontWeight: (isToday || isSelected || (hasAssignments && !isPast))
                     ? FontWeight.bold
                     : FontWeight.normal,
-                color: isSelected ? Colors.white : null,
+                color: isSelected
+                    ? Colors.white
+                    : isPast
+                        ? Colors.grey[400]
+                        : null,
               ),
             ),
-            if (dayAssignments.isNotEmpty)
+            if (hasAssignments) ...[
+              const SizedBox(height: 2),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: dayAssignments.take(3).map((a) {
-                  final color = parseHexColor(a.shiftColor).withValues(
-                      alpha: isSelected ? 0.8 : 1.0);
-                  return Container(
-                    width: 6,
-                    height: 6,
-                    margin: const EdgeInsets.symmetric(horizontal: 1),
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
+                children: [
+                  ...uniqueColors.take(3).map((color) {
+                    return Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.symmetric(horizontal: 1),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.white.withValues(alpha: 0.8)
+                            : isPast
+                                ? Colors.grey[400]
+                                : color,
+                        shape: BoxShape.circle,
+                      ),
+                    );
+                  }),
+                  if (dayAssignments.length > 3)
+                    Text(
+                      '+${dayAssignments.length - 3}',
+                      style: TextStyle(
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected
+                            ? Colors.white.withValues(alpha: 0.8)
+                            : isPast
+                                ? Colors.grey[400]
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  );
-                }).toList(),
+                ],
               ),
+            ],
           ],
         ),
       ),
@@ -720,6 +756,18 @@ class _StaffPageState extends State<StaffPage> {
                             ],
                           ),
                         ),
+                        if (_isFullAdmin)
+                          IconButton(
+                            icon: Icon(Icons.delete_outline,
+                                size: 20,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .error
+                                    .withValues(alpha: 0.7)),
+                            tooltip: 'Remove shift',
+                            onPressed: () =>
+                                _confirmUnassignShift(a),
+                          ),
                       ],
                     ),
                   );
@@ -729,6 +777,43 @@ class _StaffPageState extends State<StaffPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _confirmUnassignShift(StaffShiftAssignment assignment) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove shift assignment'),
+        content: Text(
+          'Remove ${assignment.shiftName ?? 'shift'} from ${assignment.staffName ?? 'this staff'} on ${_formatDate(assignment.assignmentDate)}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(localizations.tr('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: Text(localizations.tr('delete')),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final success = await _shiftService.unassignShiftFromStaff(
+        staffId: assignment.staffId,
+        shiftId: assignment.shiftId,
+        date: assignment.assignmentDate,
+      );
+      if (mounted && success) {
+        await _loadMonth();
+        setState(() {});
+      }
+    }
   }
 
   // ─── Staff Tab ─────────────────────────────────────────────
@@ -848,20 +933,23 @@ class _StaffPageState extends State<StaffPage> {
                   icon: const Icon(Icons.more_vert, size: 20),
                   itemBuilder: (context) => <PopupMenuEntry<String>>[
                     PopupMenuItem(value: 'edit', child: Text(localizations.tr('editProfile'))),
-                    PopupMenuItem(
-                      value: staff.isActive ? 'deactivate' : 'activate',
-                      child: Text(
-                        staff.isActive ? localizations.tr('deactivate') : localizations.tr('activate'),
-                        style: TextStyle(
-                          color: staff.isActive ? Colors.red : Theme.of(context).colorScheme.primary,
+                    if (staff.role != StaffRole.manager)
+                      PopupMenuItem(
+                        value: staff.isActive ? 'deactivate' : 'activate',
+                        child: Text(
+                          staff.isActive ? localizations.tr('deactivate') : localizations.tr('activate'),
+                          style: TextStyle(
+                            color: staff.isActive ? Colors.red : Theme.of(context).colorScheme.primary,
+                          ),
                         ),
                       ),
-                    ),
-                    const PopupMenuDivider(),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Text(localizations.tr('delete'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                    ),
+                    if (staff.role != StaffRole.manager) ...[
+                      const PopupMenuDivider(),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text(localizations.tr('delete'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      ),
+                    ],
                   ],
                   onSelected: (value) => _handleMenuAction(value, staff),
                 ),
@@ -909,24 +997,27 @@ class _StaffPageState extends State<StaffPage> {
                       PopupMenuItem(
                           value: 'edit',
                           child: Text(localizations.tr('editProfile'))),
-                      PopupMenuItem(
-                        value: staff.isActive ? 'deactivate' : 'activate',
-                        child: Text(
-                          staff.isActive ? localizations.tr('deactivate') : localizations.tr('activate'),
-                          style: TextStyle(
-                            color: staff.isActive
-                                ? Colors.red
-                                : Theme.of(context).colorScheme.primary,
+                      if (staff.role != StaffRole.manager)
+                        PopupMenuItem(
+                          value: staff.isActive ? 'deactivate' : 'activate',
+                          child: Text(
+                            staff.isActive ? localizations.tr('deactivate') : localizations.tr('activate'),
+                            style: TextStyle(
+                              color: staff.isActive
+                                  ? Colors.red
+                                  : Theme.of(context).colorScheme.primary,
+                            ),
                           ),
                         ),
-                      ),
-                      const PopupMenuDivider(),
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Text(localizations.tr('delete'),
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.error)),
-                      ),
+                      if (staff.role != StaffRole.manager) ...[
+                        const PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Text(localizations.tr('delete'),
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error)),
+                        ),
+                      ],
                     ],
                     onSelected: (value) => _handleMenuAction(value, staff),
                   ),
@@ -1117,6 +1208,8 @@ class _StaffPageState extends State<StaffPage> {
                 _buildShiftSelect(),
                 const SizedBox(height: 8),
                 _buildShiftList(),
+                const SizedBox(height: 8),
+                _buildClearPastShiftsButton(),
               ],
             ),
           ),
@@ -1557,6 +1650,80 @@ class _StaffPageState extends State<StaffPage> {
         ],
       ),
     );
+  }
+
+  Widget _buildClearPastShiftsButton() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _clearingPast ? null : _clearPastShifts,
+          icon: _clearingPast
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.delete_sweep_outlined, size: 18),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.error,
+            side: BorderSide(
+                color: Theme.of(context)
+                    .colorScheme
+                    .error
+                    .withValues(alpha: 0.4)),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+          ),
+          label: Text(_clearingPast ? 'Clearing...' : 'Clear Past Shifts'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _clearPastShifts() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear past shifts'),
+        content: const Text(
+          'This will remove all shift assignments for days that have already passed. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(localizations.tr('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: Text(localizations.tr('delete')),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final messenger = ScaffoldMessenger.of(context);
+      setState(() => _clearingPast = true);
+      final count = await _shiftService.deletePastShiftAssignments();
+      if (mounted) {
+        setState(() => _clearingPast = false);
+        await _loadMonth();
+        setState(() {});
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              count > 0
+                  ? 'Cleared $count past shift assignment${count == 1 ? '' : 's'}'
+                  : 'No past shifts to clear',
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildAssignBar() {

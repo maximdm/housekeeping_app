@@ -25,7 +25,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -41,6 +41,71 @@ class DatabaseHelper {
       try {
         await db.execute("ALTER TABLE floors_cache ALTER COLUMN number TEXT");
         await db.execute("ALTER TABLE rooms_cache ALTER COLUMN floor_number TEXT");
+      } catch (_) {}
+    }
+    if (oldVersion < 4) {
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS staff_cache (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            name TEXT NOT NULL,
+            account_name TEXT,
+            role TEXT NOT NULL,
+            phone TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            on_shift INTEGER NOT NULL DEFAULT 0
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS room_notes_cache (
+            id TEXT PRIMARY KEY,
+            room_id TEXT NOT NULL,
+            staff_id TEXT NOT NULL,
+            title TEXT,
+            content TEXT NOT NULL,
+            status TEXT DEFAULT 'none',
+            staff_name TEXT,
+            created_at TEXT NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS floor_assignments_cache (
+            id TEXT PRIMARY KEY,
+            staff_id TEXT NOT NULL,
+            floor_id TEXT NOT NULL,
+            assignment_date TEXT NOT NULL,
+            staff_name TEXT,
+            floor_name TEXT,
+            floor_number TEXT
+          )
+        ''');
+      } catch (_) {}
+    }
+    if (oldVersion < 5) {
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS shifts_cache (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            color TEXT
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS staff_shifts_cache (
+            id TEXT PRIMARY KEY,
+            staff_id TEXT NOT NULL,
+            shift_id TEXT NOT NULL,
+            assignment_date TEXT NOT NULL,
+            staff_name TEXT,
+            shift_name TEXT,
+            shift_start_time TEXT,
+            shift_end_time TEXT,
+            shift_color TEXT
+          )
+        ''');
       } catch (_) {}
     }
   }
@@ -85,6 +150,68 @@ class DatabaseHelper {
         sender_role TEXT,
         content TEXT NOT NULL,
         created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE staff_cache (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        name TEXT NOT NULL,
+        account_name TEXT,
+        role TEXT NOT NULL,
+        phone TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        on_shift INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE room_notes_cache (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL,
+        staff_id TEXT NOT NULL,
+        title TEXT,
+        content TEXT NOT NULL,
+        status TEXT DEFAULT 'none',
+        staff_name TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE floor_assignments_cache (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        floor_id TEXT NOT NULL,
+        assignment_date TEXT NOT NULL,
+        staff_name TEXT,
+        floor_name TEXT,
+        floor_number TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE shifts_cache (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        color TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE staff_shifts_cache (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        shift_id TEXT NOT NULL,
+        assignment_date TEXT NOT NULL,
+        staff_name TEXT,
+        shift_name TEXT,
+        shift_start_time TEXT,
+        shift_end_time TEXT,
+        shift_color TEXT
       )
     ''');
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/room.dart';
@@ -8,6 +9,7 @@ import '../models/todo_item.dart';
 import '../models/todo_list_item.dart';
 import 'notification_service.dart';
 import 'activity_service.dart';
+import 'database_helper.dart';
 
 class RoomNote {
   final String id;
@@ -263,12 +265,14 @@ class AssignmentService extends ChangeNotifier {
           ''')
           .eq('assignment_date', dateStr);
 
-      return (data as List)
+      final assignments = (data as List)
           .map((json) => FloorAssignment.fromJson(json))
           .toList();
+      await _cacheFloorAssignments(dateStr, assignments);
+      return assignments;
     } catch (e) {
-      debugPrint('Error loading floor assignments: $e');
-      return [];
+      debugPrint('Error loading floor assignments, using cache: $e');
+      return await _loadCachedFloorAssignments(date);
     }
   }
 
@@ -382,11 +386,12 @@ class AssignmentService extends ChangeNotifier {
       _notes = (data as List)
           .map((json) => RoomNote.fromJson(json))
           .toList();
+      await _cacheNotes(roomId, _notes);
       notifyListeners();
       return _notes;
     } catch (e) {
-      debugPrint('Error loading notes: $e');
-      return [];
+      debugPrint('Error loading notes, using cache: $e');
+      return await _loadCachedNotes(roomId);
     }
   }
 
@@ -1167,6 +1172,105 @@ class AssignmentService extends ChangeNotifier {
       return notes;
     } catch (e) {
       debugPrint('Error loading received staff notes: $e');
+      return [];
+    }
+  }
+
+  // --- Offline Cache Methods ---
+
+  Future<void> _cacheNotes(String roomId, List<RoomNote> notes) async {
+    try {
+      final db = await DatabaseHelper.database;
+      if (db == null) return;
+      await db.delete('room_notes_cache', where: 'room_id = ?', whereArgs: [roomId]);
+      for (final note in notes) {
+        await db.insert('room_notes_cache', {
+          'id': note.id,
+          'room_id': note.roomId,
+          'staff_id': note.staffId,
+          'title': note.title,
+          'content': note.content,
+          'status': note.status,
+          'staff_name': note.staffName,
+          'created_at': note.createdAt.toIso8601String(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    } catch (e) {
+      debugPrint('Error caching notes: $e');
+    }
+  }
+
+  Future<List<RoomNote>> _loadCachedNotes(String roomId) async {
+    try {
+      final db = await DatabaseHelper.database;
+      if (db == null) return [];
+      final rows = await db.query(
+        'room_notes_cache',
+        where: 'room_id = ?',
+        whereArgs: [roomId],
+        orderBy: 'created_at DESC',
+      );
+      final notes = rows.map((row) => RoomNote(
+        id: row['id'] as String,
+        roomId: row['room_id'] as String,
+        staffId: row['staff_id'] as String,
+        title: row['title'] as String? ?? '',
+        content: row['content'] as String,
+        status: row['status'] as String? ?? 'none',
+        staffName: row['staff_name'] as String?,
+        createdAt: DateTime.parse(row['created_at'] as String).toLocal(),
+      )).toList();
+      _notes = notes;
+      notifyListeners();
+      return notes;
+    } catch (e) {
+      debugPrint('Error loading cached notes: $e');
+      return [];
+    }
+  }
+
+  Future<void> _cacheFloorAssignments(String dateStr, List<FloorAssignment> assignments) async {
+    try {
+      final db = await DatabaseHelper.database;
+      if (db == null) return;
+      await db.delete('floor_assignments_cache', where: 'assignment_date = ?', whereArgs: [dateStr]);
+      for (final assignment in assignments) {
+        await db.insert('floor_assignments_cache', {
+          'id': assignment.id,
+          'staff_id': assignment.staffId,
+          'floor_id': assignment.floorId,
+          'assignment_date': dateStr,
+          'staff_name': assignment.staffName,
+          'floor_name': assignment.floorName,
+          'floor_number': assignment.floorNumber,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    } catch (e) {
+      debugPrint('Error caching floor assignments: $e');
+    }
+  }
+
+  Future<List<FloorAssignment>> _loadCachedFloorAssignments(DateTime date) async {
+    try {
+      final db = await DatabaseHelper.database;
+      if (db == null) return [];
+      final dateStr = date.toIso8601String().substring(0, 10);
+      final rows = await db.query(
+        'floor_assignments_cache',
+        where: 'assignment_date = ?',
+        whereArgs: [dateStr],
+      );
+      return rows.map((row) => FloorAssignment(
+        id: row['id'] as String,
+        staffId: row['staff_id'] as String,
+        floorId: row['floor_id'] as String,
+        assignmentDate: DateTime.parse(row['assignment_date'] as String).toLocal(),
+        staffName: row['staff_name'] as String?,
+        floorName: row['floor_name'] as String?,
+        floorNumber: row['floor_number'] as String?,
+      )).toList();
+    } catch (e) {
+      debugPrint('Error loading cached floor assignments: $e');
       return [];
     }
   }
