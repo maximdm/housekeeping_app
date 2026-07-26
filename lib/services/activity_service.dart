@@ -36,7 +36,7 @@ class ActivityService {
 
   Future<void> clearAll() async {
     try {
-      await _client.from('activity_log').delete().neq('id', '');
+      await _client.from('activity_log').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     } catch (e) {
       debugPrint('Error clearing activity: $e');
     }

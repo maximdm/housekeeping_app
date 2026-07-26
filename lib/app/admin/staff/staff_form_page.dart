@@ -352,7 +352,9 @@ class _StaffFormPageState extends State<StaffFormPage> {
                         border: const OutlineInputBorder(),
                         prefixIcon: const Icon(Icons.work_outline),
                       ),
-                      items: StaffRole.values.map((role) {
+                      items: StaffRole.values
+                          .where((role) => role != StaffRole.manager || (_isEditing && _editingStaff?.role == StaffRole.manager))
+                          .map((role) {
                         return DropdownMenuItem(
                           value: role,
                           child: Text(role.label),

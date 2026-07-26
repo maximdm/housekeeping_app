@@ -1,0 +1,48 @@
+﻿Analyzing house_keeping_app...                                  
+
+warning - Unused import: '../../../l10n/app_localizations.dart'. Try removing the import directive - lib\app\admin\rooms\rooms_page.dart:6:8 - unused_import
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:98:33 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:103:33 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:222:54 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:224:56 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:334:25 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:343:25 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:365:28 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:372:46 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:387:28 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:394:46 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:409:28 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:416:46 - const_eval_method_invocation
+   info - Use interpolation to compose strings and values. Try using string interpolation to build the composite string - lib\app\admin\rooms\rooms_page.dart:841:13 - prefer_interpolation_to_compose_strings
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:845:31 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:877:31 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:1007:35 - const_eval_method_invocation
+  error - Expected to find ']' - lib\app\admin\rooms\rooms_page.dart:1081:21 - expected_token
+   info - Use interpolation to compose strings and values. Try using string interpolation to build the composite string - lib\app\admin\rooms\rooms_page.dart:1131:40 - prefer_interpolation_to_compose_strings
+  error - Expected an identifier - lib\app\admin\rooms\rooms_page.dart:1184:13 - missing_identifier
+  error - Expected to find ')' - lib\app\admin\rooms\rooms_page.dart:1184:13 - expected_token
+  error - Expected to find ';' - lib\app\admin\rooms\rooms_page.dart:1185:11 - expected_token
+warning - Dead code. Try removing the code, or fixing the code before it so that it can be reached - lib\app\admin\rooms\rooms_page.dart:1185:12 - dead_code
+  error - Expected an identifier - lib\app\admin\rooms\rooms_page.dart:1185:12 - missing_identifier
+  error - Expected to find ';' - lib\app\admin\rooms\rooms_page.dart:1185:12 - expected_token
+  error - Unexpected text ';'. Try removing the text - lib\app\admin\rooms\rooms_page.dart:1185:12 - unexpected_token
+  error - Expected an identifier - lib\app\admin\rooms\rooms_page.dart:1186:9 - missing_identifier
+  error - Unexpected text ';'. Try removing the text - lib\app\admin\rooms\rooms_page.dart:1186:9 - unexpected_token
+   info - Unnecessary empty statement. Try removing the empty statement or restructuring the code - lib\app\admin\rooms\rooms_page.dart:1186:10 - empty_statements
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:1328:35 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:1337:35 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\admin\rooms\rooms_page.dart:1361:37 - const_eval_method_invocation
+   info - Use interpolation to compose strings and values. Try using string interpolation to build the composite string - lib\app\admin\rooms\rooms_page.dart:1478:48 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values. Try using string interpolation to build the composite string - lib\app\admin\rooms\rooms_page.dart:1696:67 - prefer_interpolation_to_compose_strings
+warning - Unused import: '../../../l10n/app_localizations.dart'. Try removing the import directive - lib\app\shared\notes\notes_page.dart:11:8 - unused_import
+warning - Unused import: '../../../l10n/app_localizations.dart'. Try removing the import directive - lib\app\staff\home\staff_rooms_page.dart:5:8 - unused_import
+  error - Methods can't be invoked in constant expressions - lib\app\staff\home\staff_rooms_page.dart:192:28 - const_eval_method_invocation
+  error - Methods can't be invoked in constant expressions - lib\app\staff\home\staff_rooms_page.dart:213:28 - const_eval_method_invocation
+
+flutter : 38 issues found. (ran in 1.9s)
+At line:1 char:60
++ ... rtos\houseKeppingApp\house_keeping_app"; flutter analyze 2>&1 | Out-F ...
++                                              ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (38 issues found. (ran in 1.9s):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

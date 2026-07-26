@@ -192,7 +192,7 @@ class ChatService extends ChangeNotifier {
         details: {'message_count': all.length},
       );
 
-      await _client.from('chat_messages').delete().neq('id', '');
+      await _client.from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       _messages.clear();
       await _cacheMessages(_messages);
       notifyListeners();

@@ -332,6 +332,7 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
     final isToday = date.year == today.year &&
         date.month == today.month &&
         date.day == today.day;
+    final isPast = date.isBefore(today) && !isToday;
     final isSelected = _selectedDate != null &&
         date.year == _selectedDate!.year &&
         date.month == _selectedDate!.month &&
@@ -397,20 +398,24 @@ class _ScheduleCalendarState extends State<ScheduleCalendar> {
                   fontSize: 13,
                   fontWeight:
                       (isToday || isSelected) ? FontWeight.bold : FontWeight.normal,
-                  color: onShift
-                      ? Theme.of(context).colorScheme.primary
-                      : hasSchedule
-                          ? Theme.of(context).colorScheme.error
-                          : null,
+                  color: isPast
+                      ? Colors.grey[400]
+                      : onShift
+                          ? Theme.of(context).colorScheme.primary
+                          : hasSchedule
+                              ? Theme.of(context).colorScheme.error
+                              : null,
                 ),
               ),
               if (hasSchedule)
                 Icon(
                   onShift ? Icons.check_circle : Icons.cancel,
                   size: 12,
-                  color: onShift
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.error,
+                  color: isPast
+                      ? Colors.grey[400]
+                      : onShift
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.error,
                 ),
             ],
           ),

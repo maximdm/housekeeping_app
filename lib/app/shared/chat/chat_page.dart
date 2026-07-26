@@ -27,6 +27,7 @@ class _ChatPageState extends State<ChatPage> {
   String? _currentStaffId;
   bool _loading = true;
   bool? _isAdmin;
+  bool _isManager = false;
 
   bool _viewingHistory = false;
   DateTime? _historyDate;
@@ -73,6 +74,7 @@ class _ChatPageState extends State<ChatPage> {
 
       _currentStaffId = staffData['id'] as String;
       _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager';
+      _isManager = staffData['role'] == 'manager';
       _chatService.setCurrentStaffId(_currentStaffId!);
 
       await _chatService.loadMessages();
@@ -316,11 +318,12 @@ class _ChatPageState extends State<ChatPage> {
             },
             itemBuilder: (_) => [
               PopupMenuItem(value: 'history', child: Text(localizations.tr('chatHistory'))),
-              PopupMenuItem(
-                value: 'clear',
-                enabled: _chatService.messages.isNotEmpty,
-                child: Text(localizations.tr('clearChat')),
-              ),
+              if (_isManager)
+                PopupMenuItem(
+                  value: 'clear',
+                  enabled: _chatService.messages.isNotEmpty,
+                  child: Text(localizations.tr('clearChat')),
+                ),
             ],
           ),
         ],
@@ -341,11 +344,12 @@ class _ChatPageState extends State<ChatPage> {
           },
           itemBuilder: (_) => [
             PopupMenuItem(value: 'history', child: Text(localizations.tr('chatHistory'))),
-            PopupMenuItem(
-              value: 'clear',
-              enabled: _chatService.messages.isNotEmpty,
-              child: Text(localizations.tr('clearChat')),
-            ),
+            if (_isManager)
+              PopupMenuItem(
+                value: 'clear',
+                enabled: _chatService.messages.isNotEmpty,
+                child: Text(localizations.tr('clearChat')),
+              ),
           ],
         ),
       ],
@@ -585,36 +589,65 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildMessageBubble(ChatMessage message, bool isMe) {
-    return GestureDetector(
-      onLongPress: () => _showMessageActions(message),
-      child: Align(
-        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.75,
-          ),
-          decoration: BoxDecoration(
-            color: isMe
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: Radius.circular(isMe ? 16 : 4),
-              bottomRight: Radius.circular(isMe ? 4 : 16),
-            ),
-          ),
-          child: Text(
-            message.content,
-            style: TextStyle(
-              color: isMe
-                  ? Theme.of(context).colorScheme.onPrimary
-                  : Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
+    final bubble = Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.70,
+      ),
+      decoration: BoxDecoration(
+        color: isMe
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(16),
+          topRight: const Radius.circular(16),
+          bottomLeft: Radius.circular(isMe ? 16 : 4),
+          bottomRight: Radius.circular(isMe ? 4 : 16),
         ),
+      ),
+      child: Text(
+        message.content,
+        style: TextStyle(
+          color: isMe
+              ? Theme.of(context).colorScheme.onPrimary
+              : Theme.of(context).colorScheme.onSurface,
+        ),
+      ),
+    );
+
+    if (!_isManager) {
+      return Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: bubble,
+      );
+    }
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!isMe) bubble,
+          GestureDetector(
+            onTap: () => _showMessageActions(message),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 6, left: 4, right: 4),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.5),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close,
+                size: 12,
+                color: Theme.of(context).colorScheme.onErrorContainer,
+              ),
+            ),
+          ),
+          if (isMe) bubble,
+        ],
       ),
     );
   }

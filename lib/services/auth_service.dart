@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/staff_member.dart';
+import 'database_helper.dart';
 
 class AuthService extends ChangeNotifier {
   final SupabaseClient _client = Supabase.instance.client;
@@ -333,7 +334,32 @@ class AuthService extends ChangeNotifier {
       }
       notifyListeners();
     } catch (e) {
-      debugPrint('Error fetching staff profile: $e');
+      debugPrint('Error fetching staff profile, trying cache: $e');
+      try {
+        final db = await DatabaseHelper.database;
+        if (db == null) return;
+        final rows = await db.query(
+          'staff_cache',
+          where: 'user_id = ? AND is_active = 1',
+          whereArgs: [user.id],
+        );
+        if (rows.isNotEmpty) {
+          final row = rows.first;
+          _currentStaff = StaffMember(
+            id: row['id'] as String,
+            userId: row['user_id'] as String?,
+            name: row['name'] as String,
+            accountName: row['account_name'] as String?,
+            role: StaffRole.fromString(row['role'] as String),
+            phone: row['phone'] as String?,
+            isActive: (row['is_active'] as int) == 1,
+            onShift: (row['on_shift'] as int) == 1,
+          );
+          notifyListeners();
+        }
+      } catch (e2) {
+        debugPrint('Error loading staff profile from cache: $e2');
+      }
     }
   }
 

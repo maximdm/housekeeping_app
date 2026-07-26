@@ -194,6 +194,7 @@ class _StaffSchedulePageState extends State<StaffSchedulePage> {
     final isToday = date.year == today.year &&
         date.month == today.month &&
         date.day == today.day;
+    final isPast = date.isBefore(today) && !isToday;
     final isSelected = date.year == _selectedDate.year &&
         date.month == _selectedDate.month &&
         date.day == _selectedDate.day;
@@ -245,7 +246,11 @@ class _StaffSchedulePageState extends State<StaffSchedulePage> {
                 fontSize: 13,
                 fontWeight:
                     (isToday || isSelected) ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Colors.white : null,
+                color: isSelected
+                    ? Colors.white
+                    : isPast
+                        ? Colors.grey[400]
+                        : null,
               ),
             ),
             if (hasShift)
@@ -256,7 +261,9 @@ class _StaffSchedulePageState extends State<StaffSchedulePage> {
                 decoration: BoxDecoration(
                   color: isSelected
                       ? Colors.white.withValues(alpha: 0.8)
-                      : shiftColor ?? Colors.grey,
+                      : isPast
+                          ? Colors.grey[400]
+                          : shiftColor ?? Colors.grey,
                   shape: BoxShape.circle,
                 ),
               ),

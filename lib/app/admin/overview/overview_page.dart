@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../services/assignment_service.dart';
 import '../../../services/activity_service.dart';
+import '../../../services/room_service.dart';
+import '../../../models/room.dart';
 import '../../../main.dart';
 import '../../../layouts/admin_layout.dart';
 
@@ -39,33 +41,35 @@ class _OverviewPageState extends State<OverviewPage> {
     setState(() => _loading = true);
 
     try {
-      final results = await Future.wait([
-        _client.from('rooms').select('''
-          id, number, status, description,
-          room_type:room_types(name),
-          floor:floors(name, number)
-        '''),
-        _client.from('activity_log').select('''
+      final roomService = RoomService();
+      await roomService.loadRooms();
+
+      _allRooms = roomService.rooms.map((r) => {
+        'id': r.id,
+        'number': r.number,
+        'status': r.status.dbValue,
+        'description': r.description,
+        'room_type': {'name': r.roomTypeName},
+        'floor': {'name': r.floorName, 'number': r.floorNumber},
+      }).toList();
+
+      _cleanRooms = roomService.rooms.where((r) => r.status == RoomStatus.clean).length;
+      _dirtyRooms = roomService.rooms.where((r) => r.status == RoomStatus.dirty).length;
+      _inProgressRooms = roomService.rooms.where((r) => r.status == RoomStatus.inProgress).length;
+      _skippedRooms = roomService.rooms.where((r) => r.status == RoomStatus.skipped).length;
+
+      try {
+        final data = await _client.from('activity_log').select('''
           id, staff_id, action, details, created_at,
           staff:staff(name)
-        ''').order('created_at', ascending: false).limit(_activityLimit),
-      ]);
-
-      final rooms = results[0] as List;
-      _allRooms = rooms.cast<Map<String, dynamic>>();
-      _cleanRooms =
-          rooms.where((r) => r['status'] == 'clean').length;
-      _dirtyRooms =
-          rooms.where((r) => r['status'] == 'dirty').length;
-      _inProgressRooms =
-          rooms.where((r) => r['status'] == 'in_progress').length;
-      _skippedRooms =
-          rooms.where((r) => r['status'] == 'skipped').length;
-
-      final activity = results[1] as List;
-      _recentActivity = activity
-          .map((json) => ActivityLogEntry.fromJson(json))
-          .toList();
+        ''').order('created_at', ascending: false).limit(_activityLimit);
+        _recentActivity = (data as List)
+            .map((json) => ActivityLogEntry.fromJson(json))
+            .toList();
+      } catch (e) {
+        debugPrint('Error loading activity (offline): $e');
+        _recentActivity = [];
+      }
 
       _priorityAlerts = [];
       if (_skippedRooms > 0) {

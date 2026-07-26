@@ -486,6 +486,7 @@ class _StaffDashboardPageState extends State<StaffDashboardPage> {
     final isToday = date.year == today.year &&
         date.month == today.month &&
         date.day == today.day;
+    final isPast = date.isBefore(today) && !isToday;
     final isSelected = date.year == _selectedDate.year &&
         date.month == _selectedDate.month &&
         date.day == _selectedDate.day;
@@ -537,7 +538,11 @@ class _StaffDashboardPageState extends State<StaffDashboardPage> {
                 fontWeight: (isToday || isSelected)
                     ? FontWeight.bold
                     : FontWeight.normal,
-                color: isSelected ? Colors.white : null,
+                color: isSelected
+                    ? Colors.white
+                    : isPast
+                        ? Colors.grey[400]
+                        : null,
               ),
             ),
             if (hasShift)
@@ -546,7 +551,9 @@ class _StaffDashboardPageState extends State<StaffDashboardPage> {
                 height: 8,
                 margin: const EdgeInsets.only(top: 2),
                 decoration: BoxDecoration(
-                  color: shiftColor ?? Colors.grey,
+                  color: isPast
+                      ? Colors.grey[400]
+                      : shiftColor ?? Colors.grey,
                   shape: BoxShape.circle,
                 ),
               ),
