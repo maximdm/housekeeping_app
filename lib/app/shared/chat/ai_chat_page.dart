@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../main.dart';
 import '../../../services/chatbot_service.dart';
+import '../../../services/database_helper.dart';
 import '../../../layouts/admin_layout.dart';
 import '../../../layouts/staff_layout.dart';
 
@@ -131,15 +132,36 @@ class _AiChatPageState extends State<AiChatPage> {
   Future<void> _detectRole() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
-    final staffData = await Supabase.instance.client
-        .from('staff')
-        .select('role')
-        .eq('user_id', user.id)
-        .maybeSingle();
-    if (staffData != null && mounted) {
-      setState(() => _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager');
-    } else if (mounted) {
-      setState(() => _isAdmin = false);
+
+    String? role;
+    try {
+      final staffData = await Supabase.instance.client
+          .from('staff')
+          .select('role')
+          .eq('user_id', user.id)
+          .maybeSingle();
+      role = staffData?['role'] as String?;
+    } catch (e) {
+      debugPrint('Error detecting role, trying cache: $e');
+      try {
+        final db = await DatabaseHelper.database;
+        if (db != null) {
+          final rows = await db.query(
+            'staff_cache',
+            where: 'user_id = ?',
+            whereArgs: [user.id],
+          );
+          if (rows.isNotEmpty) {
+            role = rows.first['role'] as String?;
+          }
+        }
+      } catch (e2) {
+        debugPrint('Error loading role from cache: $e2');
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isAdmin = role == 'receptionist' || role == 'manager');
     }
   }
 

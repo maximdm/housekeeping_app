@@ -3,6 +3,7 @@ import 'package:routefly/routefly.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../services/database_helper.dart';
 import '../../widgets/animations.dart';
 
 class SplashPage extends StatefulWidget {
@@ -55,16 +56,37 @@ class _SplashPageState extends State<SplashPage>
     }
 
     try {
-      final data = await Supabase.instance.client
-          .from('staff')
-          .select('role')
-          .eq('user_id', user.id)
-          .eq('is_active', true)
-          .maybeSingle();
+      String? role;
+      try {
+        final data = await Supabase.instance.client
+            .from('staff')
+            .select('role')
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .maybeSingle();
+        role = data?['role'] as String?;
+      } catch (e) {
+        debugPrint('Error loading staff role, trying cache: $e');
+        try {
+          final db = await DatabaseHelper.database;
+          if (db != null) {
+            final rows = await db.query(
+              'staff_cache',
+              where: 'user_id = ? AND is_active = 1',
+              whereArgs: [user.id],
+            );
+            if (rows.isNotEmpty) {
+              role = rows.first['role'] as String?;
+            }
+          }
+        } catch (e2) {
+          debugPrint('Error loading role from cache: $e2');
+        }
+      }
 
       if (!mounted) return;
 
-      if (data == null) {
+      if (role == null) {
         await Supabase.instance.client.auth.signOut();
         Routefly.navigate('/login');
         return;
@@ -80,7 +102,6 @@ class _SplashPageState extends State<SplashPage>
         return;
       }
 
-      final role = data['role'] as String;
       if (role == 'receptionist' || role == 'manager') {
         Routefly.navigate('/admin/overview');
       } else {

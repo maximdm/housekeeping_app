@@ -8,6 +8,7 @@ import '../../../main.dart';
 import '../../../models/room.dart';
 import '../../../services/assignment_service.dart';
 import '../../../services/room_service.dart';
+import '../../../services/database_helper.dart';
 import '../../../layouts/staff_layout.dart';
 
 class StaffRoomsPage extends StatefulWidget {
@@ -59,10 +60,37 @@ class _StaffRoomsPageState extends State<StaffRoomsPage>
           .eq('user_id', user.id)
           .maybeSingle();
 
-      if (staffData == null) return;
+      if (staffData != null) {
+        _staffId = staffData['id'] as String;
+      }
+    } catch (e) {
+      debugPrint('Error loading staff data, trying cache: $e');
+    }
 
-      _staffId = staffData['id'] as String;
+    if (_staffId == null) {
+      try {
+        final db = await DatabaseHelper.database;
+        if (db != null) {
+          final rows = await db.query(
+            'staff_cache',
+            where: 'user_id = ?',
+            whereArgs: [user.id],
+          );
+          if (rows.isNotEmpty) {
+            _staffId = rows.first['id'] as String;
+          }
+        }
+      } catch (e2) {
+        debugPrint('Error loading staff from cache: $e2');
+      }
+    }
 
+    if (_staffId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+
+    try {
       final floorData = await Supabase.instance.client
           .from('floor_assignments')
           .select('floor_id')
@@ -73,19 +101,13 @@ class _StaffRoomsPageState extends State<StaffRoomsPage>
       _assignedFloorIds = (floorData as List)
           .map((f) => f['floor_id'] as String)
           .toList();
-
-      final roomsData = await Supabase.instance.client.from('rooms').select('''
-            id, number, status, room_type_id, floor_id, description,
-            room_type:room_types(name),
-            floor:floors(name, number)
-          ''');
-
-      _allRooms = (roomsData as List)
-          .map((json) => Room.fromJson(json))
-          .toList();
     } catch (e) {
-      debugPrint('Error loading staff rooms: $e');
+      debugPrint('Error loading floor assignments: $e');
     }
+
+    final roomService = RoomService();
+    await roomService.loadRooms();
+    _allRooms = roomService.rooms;
 
     if (mounted) setState(() => _loading = false);
   }

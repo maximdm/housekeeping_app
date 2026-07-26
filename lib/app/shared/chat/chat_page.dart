@@ -7,6 +7,7 @@ import '../../../models/chat_message.dart';
 import '../../../models/staff_member.dart';
 import '../../../main.dart';
 import '../../../services/chat_service.dart';
+import '../../../services/database_helper.dart';
 import '../../../layouts/admin_layout.dart';
 import '../../../layouts/staff_layout.dart';
 
@@ -60,29 +61,49 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
+    Map<String, dynamic>? staffData;
     try {
-      final staffData = await Supabase.instance.client
+      staffData = await Supabase.instance.client
           .from('staff')
           .select('id, name, role')
           .eq('user_id', user.id)
           .maybeSingle();
-
-      if (staffData == null || staffData['id'] == null) {
-        if (mounted) setState(() { _isAdmin = false; _loading = false; });
-        return;
-      }
-
-      _currentStaffId = staffData['id'] as String;
-      _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager';
-      _isManager = staffData['role'] == 'manager';
-      _chatService.setCurrentStaffId(_currentStaffId!);
-
-      await _chatService.loadMessages();
-      _chatService.addListener(_onMessagesChanged);
-      _chatService.subscribeToChat();
     } catch (e) {
-      debugPrint('Error initializing chat: $e');
+      debugPrint('Error loading staff for chat, trying cache: $e');
+      try {
+        final db = await DatabaseHelper.database;
+        if (db != null) {
+          final rows = await db.query(
+            'staff_cache',
+            where: 'user_id = ?',
+            whereArgs: [user.id],
+          );
+          if (rows.isNotEmpty) {
+            staffData = {
+              'id': rows.first['id'],
+              'name': rows.first['name'],
+              'role': rows.first['role'],
+            };
+          }
+        }
+      } catch (e2) {
+        debugPrint('Error loading staff from cache: $e2');
+      }
     }
+
+    if (staffData == null || staffData['id'] == null) {
+      if (mounted) setState(() { _isAdmin = false; _loading = false; });
+      return;
+    }
+
+    _currentStaffId = staffData['id'] as String;
+    _isAdmin = staffData['role'] == 'receptionist' || staffData['role'] == 'manager';
+    _isManager = staffData['role'] == 'manager';
+    _chatService.setCurrentStaffId(_currentStaffId!);
+
+    await _chatService.loadMessages();
+    _chatService.addListener(_onMessagesChanged);
+    _chatService.subscribeToChat();
 
     if (mounted) {
       setState(() => _loading = false);

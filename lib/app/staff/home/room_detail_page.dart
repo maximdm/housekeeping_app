@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../main.dart';
 import '../../../models/room.dart';
 import '../../../services/assignment_service.dart';
+import '../../../services/database_helper.dart';
 import '../../../layouts/staff_layout.dart';
 
 class RoomDetailPage extends StatefulWidget {
@@ -52,15 +53,38 @@ class _RoomDetailPageState extends State<RoomDetailPage> {
           .eq('user_id', user.id)
           .maybeSingle();
 
-      if (staffData == null) return;
-      _staffId = staffData['id'] as String;
-
-      _room = StaffSelectedRoom.instance;
-      if (_room != null) {
-        _notes = await _assignmentService.loadNotes(_room!.id);
+      if (staffData != null) {
+        _staffId = staffData['id'] as String;
       }
     } catch (e) {
-      debugPrint('Error loading room detail: $e');
+      debugPrint('Error loading staff data, trying cache: $e');
+    }
+
+    if (_staffId == null) {
+      try {
+        final db = await DatabaseHelper.database;
+        if (db != null) {
+          final rows = await db.query(
+            'staff_cache',
+            where: 'user_id = ?',
+            whereArgs: [user.id],
+          );
+          if (rows.isNotEmpty) {
+            _staffId = rows.first['id'] as String;
+          }
+        }
+      } catch (e2) {
+        debugPrint('Error loading staff from cache: $e2');
+      }
+    }
+
+    _room = StaffSelectedRoom.instance;
+    if (_room != null) {
+      try {
+        _notes = await _assignmentService.loadNotes(_room!.id);
+      } catch (e) {
+        debugPrint('Error loading notes: $e');
+      }
     }
 
     if (mounted) setState(() => _loading = false);

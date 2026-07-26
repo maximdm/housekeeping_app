@@ -7,6 +7,7 @@ import '../../../models/room.dart';
 import '../../../models/shift.dart';
 import '../../../services/assignment_service.dart';
 import '../../../services/shift_service.dart';
+import '../../../services/database_helper.dart';
 import '../../../layouts/staff_layout.dart';
 
 class StaffDashboardPage extends StatefulWidget {
@@ -47,9 +48,37 @@ class _StaffDashboardPageState extends State<StaffDashboardPage> {
           .eq('user_id', user.id)
           .maybeSingle();
 
-      if (staffData == null) return;
+      if (staffData != null) {
+        _staffId = staffData['id'] as String;
+      }
+    } catch (e) {
+      debugPrint('Error loading staff data, trying cache: $e');
+    }
 
-      _staffId = staffData['id'] as String;
+    if (_staffId == null) {
+      try {
+        final db = await DatabaseHelper.database;
+        if (db != null) {
+          final rows = await db.query(
+            'staff_cache',
+            where: 'user_id = ?',
+            whereArgs: [user.id],
+          );
+          if (rows.isNotEmpty) {
+            _staffId = rows.first['id'] as String;
+          }
+        }
+      } catch (e2) {
+        debugPrint('Error loading staff from cache: $e2');
+      }
+    }
+
+    if (_staffId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+
+    try {
       _dirtyRooms = await _assignmentService.loadMyDirtyRoomsForDate(
         _staffId!,
         DateTime.now(),

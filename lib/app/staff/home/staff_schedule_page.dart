@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../layouts/staff_layout.dart';
 import '../../../models/shift.dart';
 import '../../../services/shift_service.dart';
+import '../../../services/database_helper.dart';
 
 class StaffSchedulePage extends StatefulWidget {
   const StaffSchedulePage({super.key});
@@ -39,12 +40,33 @@ class _StaffSchedulePageState extends State<StaffSchedulePage> {
           .eq('user_id', user.id)
           .maybeSingle();
 
-      if (staffData == null) return;
-      _staffId = staffData['id'] as String;
-
-      await _loadMonth();
+      if (staffData != null) {
+        _staffId = staffData['id'] as String;
+      }
     } catch (e) {
-      debugPrint('Error loading schedule: $e');
+      debugPrint('Error loading staff data, trying cache: $e');
+    }
+
+    if (_staffId == null) {
+      try {
+        final db = await DatabaseHelper.database;
+        if (db != null) {
+          final rows = await db.query(
+            'staff_cache',
+            where: 'user_id = ?',
+            whereArgs: [user.id],
+          );
+          if (rows.isNotEmpty) {
+            _staffId = rows.first['id'] as String;
+          }
+        }
+      } catch (e2) {
+        debugPrint('Error loading staff from cache: $e2');
+      }
+    }
+
+    if (_staffId != null) {
+      await _loadMonth();
     }
 
     if (mounted) setState(() => _loading = false);
