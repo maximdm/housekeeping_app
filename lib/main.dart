@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'l10n/app_localizations.dart';
 import 'main.route.dart';
+import 'services/database_helper.dart';
 import 'services/notification_service.dart';
 import 'services/theme_service.dart';
 
@@ -41,6 +42,7 @@ void main() async {
     publishableKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
   );
 
+  await DatabaseHelper.init();
   await NotificationService().init();
   await themeService.init();
   await localizations.init();
